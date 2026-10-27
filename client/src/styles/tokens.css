@@ -1,0 +1,67 @@
+@layer tokens {
+  :root {
+    --font: 'Plus Jakarta Sans Variable', system-ui, sans-serif;
+
+    /* Text styles: dùng `font: var(--text-*)`, không viết lại size/line-height. */
+    --text-small: 400 12px/16px var(--font);
+    --text-body: 400 14px/20px var(--font);
+    --text-title: 700 18px/26px var(--font);
+    --text-display: 800 32px/40px var(--font);
+
+    /* Surfaces */
+    /* Neutral: một undertone sage duy nhất (không trộn stone + slate). */
+    --bg-page: #e9efe9;
+    --bg-surface: #fff;
+    --bg-subtle: #f6f9f6;
+    --bg-muted: #dde7df;
+    --border: #d5e0d8;
+    --overlay: rgb(16 40 30 / 45%);
+
+    /* Text */
+    --text: #14231c;
+    --text-muted: #3e5148;
+    --text-subtle: #5f7268;
+    --text-faint: #8b9c92; /* chỉ cho giờ, placeholder */
+
+    /* Accent: emerald đậm cho chỗ cần nhấn (nút chính, tin của mình). */
+    --accent: #047857;
+    --accent-strong: #065f46;
+    --accent-dark: #0f3d2e;
+    --accent-bright: #10b981;
+    --accent-soft: #d1fae5;
+    --accent-softer: #ecfdf5;
+    --chat-mine: #047857;
+    --chat-mine-text: #fff;
+
+    /* Màu phụ, chỉ dùng cho badge chưa đọc. */
+    --notify: #c2410c;
+
+    /* Status */
+    --danger: #b91c1c;
+    --danger-strong: #991b1b;
+    --danger-bg: #fee2e2;
+    --danger-line: #fecaca;
+    --warning-fg: #92400e;
+    --warning-bg: #fef3c7;
+    --warning-line: #fde68a;
+
+    --radius-sm: 12px;
+    --radius-md: 16px;
+    --radius-lg: 28px;
+    --radius-pill: 999px;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+
+    /* Bóng ngả xanh rừng thay cho đen/slate. */
+    --shadow-sm: 0 1px 2px rgb(16 54 38 / 8%);
+    --shadow-md: 0 10px 30px rgb(16 54 38 / 14%);
+    --shadow-lg: 0 24px 60px rgb(16 54 38 / 20%);
+
+    --transition: 160ms ease;
+  }
+}

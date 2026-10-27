@@ -1,0 +1,15 @@
+.search-bar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  padding: 10px var(--space-4);
+}
+
+@media (max-width: 520px) {
+  .search-bar {
+    flex-wrap: wrap;
+  }
+
+  .search-bar .grow {
+    flex-basis: 100%;
+  }
+}

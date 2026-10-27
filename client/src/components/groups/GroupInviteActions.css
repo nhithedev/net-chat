@@ -1,0 +1,13 @@
+.invite-actions {
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  padding: 14px 18px;
+}
+
+@media (max-width: 760px) {
+  .invite-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

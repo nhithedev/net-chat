@@ -1,0 +1,122 @@
+.auth-page {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: minmax(0, 1.1fr) minmax(420px, 0.9fr);
+}
+
+.auth-page__intro {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--accent-dark);
+  padding: clamp(40px, 8vw, 120px);
+  color: var(--bg-surface);
+}
+
+.auth-page__intro::before,
+.auth-page__intro::after {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  content: '';
+  opacity: 0.1;
+}
+
+.auth-page__intro::before {
+  top: -150px;
+  right: -100px;
+  width: 360px;
+  height: 360px;
+}
+
+.auth-page__intro::after {
+  bottom: -100px;
+  left: -60px;
+  width: 220px;
+  height: 220px;
+}
+
+.auth-page__intro h1 {
+  position: relative;
+  margin: var(--space-6) 0 var(--space-4);
+  color: inherit;
+  font: var(--text-display);
+  letter-spacing: -0.04em;
+}
+
+.auth-page__intro em {
+  color: var(--accent-bright);
+  font-style: normal;
+}
+
+.auth-page__intro > p {
+  position: relative;
+  max-width: 540px;
+  color: var(--accent-soft);
+}
+
+.auth-page__demo {
+  position: relative;
+  display: grid;
+  width: fit-content;
+  gap: var(--space-1);
+  margin-top: 34px;
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--accent-soft);
+  font: var(--text-small);
+}
+
+.auth-page__demo span {
+  font-family: ui-monospace, monospace;
+}
+
+.auth-page__form {
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: clamp(24px, 5vw, 72px);
+}
+
+.auth-form {
+  width: min(100%, 430px);
+  padding: 28px;
+  box-shadow: var(--shadow-md);
+}
+
+.auth-form__foot {
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-page__intro {
+    min-height: 280px;
+    padding: 34px var(--space-6);
+  }
+
+  .auth-page__intro h1 {
+    margin: var(--space-4) 0 10px;
+  }
+
+  .auth-page__demo {
+    margin-top: var(--space-5);
+  }
+
+  .auth-page__form {
+    padding: 28px 18px 42px;
+  }
+}
+
+@media (max-width: 520px) {
+  .auth-form {
+    padding: var(--space-5);
+  }
+}

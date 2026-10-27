@@ -1,0 +1,12 @@
+.insights {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+@media (max-width: 760px) {
+  .insights {
+    grid-template-rows: none;
+  }
+}

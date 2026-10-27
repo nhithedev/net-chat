@@ -1,0 +1,22 @@
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--tone-line);
+  background: var(--tone-bg);
+  padding: 9px var(--space-4);
+  color: var(--tone-fg);
+  font: var(--text-small);
+  text-align: center;
+}
+
+.banner .dot {
+  background: currentColor;
+}
+
+.banner[data-inline] {
+  border: 1px solid var(--tone-line);
+  border-radius: var(--radius-sm);
+  padding: 10px var(--space-3);
+}

@@ -1,0 +1,4 @@
+.group-list__label {
+  margin: 2px var(--space-1) 0;
+  font-weight: 600;
+}

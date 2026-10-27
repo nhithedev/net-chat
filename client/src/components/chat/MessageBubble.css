@@ -1,0 +1,102 @@
+.bubble-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.bubble-row[data-mine] {
+  justify-content: flex-end;
+}
+
+/* Tin tiếp theo trong cụm: kéo sát tin trước (bù khoảng gap của danh sách). */
+.bubble-row[data-continued] {
+  margin-top: -11px;
+}
+
+/* Giữ chỗ avatar để các bubble trong cụm thẳng hàng. */
+.bubble-row__gap {
+  width: 32px;
+  flex: 0 0 32px;
+}
+
+.bubble-row__content {
+  display: grid;
+  min-width: 0;
+  max-width: min(78%, 440px);
+  gap: 5px;
+}
+
+.bubble-row__meta {
+  display: flex;
+  gap: var(--space-2);
+  font: var(--text-small);
+}
+
+/* Tin của mình chỉ có giờ: căn phải cho thẳng với bubble. */
+.bubble-row[data-mine] .bubble-row__meta {
+  justify-self: end;
+}
+
+/* Giờ chi tiết (đến giây) hiện phía trên bubble khi hover. */
+.bubble-wrap {
+  position: relative;
+}
+
+.bubble-wrap__time {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 2px);
+  left: 0;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  padding: 2px var(--space-2);
+  color: var(--bg-surface);
+  font: var(--text-small);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.bubble-row[data-mine] .bubble-wrap__time {
+  right: 0;
+  left: auto;
+}
+
+.bubble-wrap:hover .bubble-wrap__time {
+  opacity: 1;
+}
+
+.bubble {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 14px var(--space-4);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.bubble-row[data-mine] .bubble {
+  border-color: var(--chat-mine);
+  background: var(--chat-mine);
+  color: var(--chat-mine-text);
+}
+
+.bubble-row__delivery {
+  color: var(--text-subtle);
+}
+
+.bubble-row[data-mine] .bubble-row__delivery {
+  justify-self: end;
+  color: var(--accent-strong);
+}
+
+.bubble-row__delivery[data-pending] {
+  color: var(--warning-fg);
+}
+
+@media (max-width: 520px) {
+  .bubble-row__content {
+    max-width: calc(100% - 44px);
+  }
+}

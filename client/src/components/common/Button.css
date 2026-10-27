@@ -1,0 +1,97 @@
+.btn {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid var(--btn-border, transparent);
+  border-radius: var(--radius-md);
+  background: var(--btn-bg);
+  padding: 10px 18px;
+  color: var(--btn-fg);
+  font-weight: 600;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--btn-hover-border);
+  background: var(--btn-hover-bg);
+  color: var(--btn-hover-fg, var(--btn-fg));
+}
+
+.btn:disabled {
+  background: var(--bg-muted);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.btn[data-variant='primary'] {
+  --btn-bg: var(--accent);
+  --btn-fg: var(--bg-surface);
+  --btn-hover-bg: var(--accent-strong);
+  --btn-hover-border: var(--accent-dark);
+}
+
+.btn[data-variant='soft'] {
+  --btn-bg: var(--accent-softer);
+  --btn-fg: var(--accent-strong);
+  --btn-hover-bg: var(--accent-soft);
+  --btn-hover-border: var(--accent-strong);
+  --btn-hover-fg: var(--accent-dark);
+}
+
+.btn[data-variant='ghost'] {
+  --btn-bg: transparent;
+  --btn-fg: var(--text-muted);
+  --btn-hover-bg: var(--bg-muted);
+  --btn-hover-border: var(--text-subtle);
+  --btn-hover-fg: var(--text);
+}
+
+.btn[data-variant='outline'] {
+  --btn-bg: var(--bg-surface);
+  --btn-fg: var(--text-muted);
+  --btn-border: var(--border);
+  --btn-hover-bg: var(--bg-muted);
+  --btn-hover-border: var(--text-muted);
+  --btn-hover-fg: var(--text);
+}
+
+.btn[data-variant='danger'] {
+  --btn-bg: var(--bg-surface);
+  --btn-fg: var(--danger);
+  --btn-border: var(--danger);
+  --btn-hover-bg: var(--danger-bg);
+  --btn-hover-border: var(--danger);
+  --btn-hover-fg: var(--danger-strong);
+}
+
+.btn[data-size='sm'] {
+  min-height: 32px;
+  padding: 4px 12px;
+}
+
+.btn[data-shape='pill'] {
+  border-radius: var(--radius-pill);
+  padding-inline: var(--space-4);
+}
+
+.btn[data-shape='icon'] {
+  width: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.btn[data-shape='icon'][data-size='sm'] {
+  width: 32px;
+}
+
+@media (max-width: 520px) {
+  .actions > .btn,
+  .dialog__footer > .btn {
+    flex: 1;
+  }
+}

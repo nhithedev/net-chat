@@ -1,0 +1,78 @@
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    background: var(--bg-page);
+  }
+
+  /* Thanh cuộn mảnh, mang màu chủ đạo (Firefox + Chrome/Edge/Safari mới). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent) transparent;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background: var(--bg-page);
+    color: var(--text);
+    font: var(--text-body);
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  ul {
+    margin: 0;
+  }
+
+  ul {
+    padding: 0;
+    list-style: none;
+  }
+
+  h1,
+  h2,
+  h3 {
+    color: var(--text);
+    font: var(--text-title);
+  }
+
+  small {
+    color: var(--text-subtle);
+    font: var(--text-small);
+  }
+
+  button {
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  input,
+  textarea {
+    color: var(--text);
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--accent-soft);
+    outline-offset: 2px;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}

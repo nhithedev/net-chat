@@ -1,0 +1,25 @@
+/* Nội dung cao tối thiểu để cụm nút luôn nằm sát đáy popup. */
+.friend-profile {
+  display: flex;
+  min-height: 300px;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.friend-profile__footer {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: auto;
+}
+
+.friend-profile__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+@media (max-width: 520px) {
+  .friend-profile__actions {
+    grid-template-columns: 1fr;
+  }
+}

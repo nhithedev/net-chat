@@ -1,0 +1,57 @@
+.chat-shell {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  height: 100dvh;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg-muted);
+}
+
+.global-status {
+  display: grid;
+  grid-row: 1;
+}
+
+.chat-page {
+  display: grid;
+  grid-row: 2;
+  min-height: 0;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--space-3);
+  overflow: hidden;
+  padding: var(--space-3);
+}
+
+.chat-page__main {
+  position: relative;
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+}
+
+/* Điện thoại: một cột, hiện danh sách hoặc hội thoại. */
+@media (max-width: 760px) {
+  .chat-page {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .chat-page__main {
+    display: none;
+  }
+
+  .chat-page[data-conversation] > .sidebar {
+    display: none;
+  }
+
+  .chat-page[data-conversation] .chat-page__main {
+    display: grid;
+  }
+}

@@ -1,0 +1,179 @@
+/* Primitive dùng chung. Mỗi mẫu style chỉ được định nghĩa một lần ở đây. */
+@layer ui {
+  /* Layout */
+  .stack {
+    display: grid;
+    /* minmax(0, …): cột không nới theo nội dung dài (chữ nowrap) nên .truncate bên trong mới cắt được. */
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--gap, var(--space-3));
+  }
+
+  .row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--gap, var(--space-3));
+  }
+
+  .row[data-center] {
+    justify-content: center;
+  }
+
+  [data-gap='1'] {
+    --gap: var(--space-1);
+  }
+
+  [data-gap='2'] {
+    --gap: var(--space-2);
+  }
+
+  [data-gap='4'] {
+    --gap: var(--space-4);
+  }
+
+  .grow {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Surface */
+  .card {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    padding: var(--space-4);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Text */
+  .subtle {
+    color: var(--text-subtle);
+    font: var(--text-small);
+  }
+
+  .error {
+    color: var(--danger);
+    font: var(--text-small);
+  }
+
+  .link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: var(--accent-strong);
+    font-weight: 700;
+  }
+
+  .link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /* Mọi hàng/nút bấm được dùng chung một kiểu hover + trạng thái chọn. */
+  .interactive {
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    transition:
+      background-color var(--transition),
+      border-color var(--transition),
+      color var(--transition);
+  }
+
+  .interactive:hover,
+  .interactive:has(:focus-visible),
+  .interactive[aria-current='true'] {
+    border-color: var(--accent-strong);
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+  }
+
+  /* Tone: Banner, Toast, Badge dùng chung. */
+  [data-tone='info'] {
+    --tone-bg: var(--accent-softer);
+    --tone-fg: var(--accent-strong);
+    --tone-line: var(--accent-soft);
+  }
+
+  [data-tone='warning'] {
+    --tone-bg: var(--warning-bg);
+    --tone-fg: var(--warning-fg);
+    --tone-line: var(--warning-line);
+  }
+
+  [data-tone='danger'] {
+    --tone-bg: var(--danger-bg);
+    --tone-fg: var(--danger-strong);
+    --tone-line: var(--danger-line);
+  }
+
+  .spinner {
+    display: inline-block;
+    width: var(--size, 28px);
+    height: var(--size, 28px);
+    border: 3px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .dot {
+    display: inline-block;
+    width: var(--size, 8px);
+    height: var(--size, 8px);
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+
+  .dot[data-online='true'] {
+    background: var(--accent-bright);
+  }
+
+  /* Avatar/tiêu đề/phụ đề căn giữa: profile, group info, thông báo. */
+  .hero {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    text-align: center;
+  }
+
+  .overlay {
+    position: fixed;
+    z-index: 50;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    background: var(--overlay);
+    padding: var(--space-5);
+  }
+
+  @media (max-width: 520px) {
+    .card {
+      padding: var(--space-3);
+    }
+
+    .overlay {
+      padding: var(--space-3);
+    }
+  }
+}

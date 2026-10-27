@@ -1,0 +1,25 @@
+.panel {
+  width: min(100%, 460px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 22px;
+  box-shadow: var(--shadow-lg);
+}
+
+.panel[data-size='sm'] {
+  width: min(100%, 400px);
+}
+
+.panel[data-size='lg'] {
+  width: min(100%, 520px);
+}
+
+@media (max-width: 520px) {
+  .panel {
+    max-height: calc(100dvh - 24px);
+    padding: 18px;
+  }
+}
