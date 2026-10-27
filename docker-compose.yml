@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:17
+    container_name: netchat-db
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: chat
+      POSTGRES_DB: chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - netchat-data:/var/lib/postgresql/data
+      # chỉ chạy khi volume còn trống (lần khởi tạo đầu tiên)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+volumes:
+  netchat-data:
