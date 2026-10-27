@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import LoginForm from '../components/auth/LoginForm'
 import RegisterForm, { type RegisterErrors } from '../components/auth/RegisterForm'
+import { useActivityLog } from '../hooks/ActivityLogContext'
 import type { Account } from '../types/domain'
-import { Limits } from '../types/protocol'
+import { ErrorCode, Limits } from '../types/protocol'
 import './AuthPage.css'
 
 const demoAccount: Account = { username: 'demo', password: 'demo123', displayName: 'An Trần' }
@@ -26,6 +27,7 @@ export default function AuthPage({ registeredAccount, onRegistered, onAuthentica
   const [loginError, setLoginError] = useState('')
   const [registerErrors, setRegisterErrors] = useState<RegisterErrors>({})
   const [notice, setNotice] = useState('')
+  const { log } = useActivityLog()
 
   function showRegister() {
     setLoginError('')
@@ -66,6 +68,7 @@ export default function AuthPage({ registeredAccount, onRegistered, onAuthentica
     }
 
     onRegistered(account)
+    log('register', { username: account.username })
     setRegisterErrors({})
     setNotice('Đăng ký thành công. Hãy đăng nhập bằng tài khoản vừa tạo.')
     setScreen('login')
@@ -78,15 +81,18 @@ export default function AuthPage({ registeredAccount, onRegistered, onAuthentica
     const account = [registeredAccount, demoAccount].find((item) => item?.username === username)
 
     if (!account) {
+      log('login_fail', { username, detail: { code: ErrorCode.UserNotFound } })
       setLoginError('Không tìm thấy tài khoản này.')
       return
     }
     if (account.password !== password) {
+      log('login_fail', { username, detail: { code: ErrorCode.WrongPassword } })
       setLoginError('Mật khẩu chưa chính xác.')
       return
     }
 
     setLoginError('')
+    log('login_ok', { username })
     onAuthenticated(account)
   }
 

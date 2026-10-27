@@ -9,9 +9,11 @@ import KickedNotice from '../components/groups/KickedNotice'
 import ConversationInfoDialog from '../components/layout/ConversationInfoDialog'
 import GlobalStatusArea from '../components/layout/GlobalStatusArea'
 import Sidebar from '../components/layout/Sidebar'
+import { useActivityLog } from '../hooks/ActivityLogContext'
 import { ChatContext } from '../hooks/ChatContext'
 import useChatPrototype from '../hooks/useChatPrototype'
 import useConnectionStatus from '../hooks/useConnectionStatus'
+import useMockPresence from '../hooks/useMockPresence'
 import type { Account, User } from '../types/domain'
 import type { KickReason } from '../types/protocol'
 import './ChatPage.css'
@@ -29,9 +31,22 @@ type DialogName = 'addFriend' | 'createGroup' | 'invite'
 
 export default function ChatPage({ user, onSessionExpired, onOpenAccount, onKicked, onDisconnected, onBlockUser }: ChatPageProps) {
   const connection = useConnectionStatus({ onSessionExpired, onDisconnected })
-  const chat = useChatPrototype(user, connection.status, { onKicked, onDisconnected, onBlockUser })
+  const activity = useActivityLog()
+  const chat = useChatPrototype(user, connection.status, {
+    onKicked,
+    onDisconnected,
+    onBlockUser,
+    onActivity: (event, detail) => activity.log(event, { detail }),
+  })
   const [dialog, setDialog] = useState<DialogName | null>(null)
   const { state, actions } = chat
+
+  // Người khác kết nối/ngắt kết nối: cập nhật danh sách online và ghi log kết nối.
+  useMockPresence(state.userDirectory, (username, online) => {
+    actions.setUserPresence(username, online)
+    if (online) activity.connect(username)
+    else activity.disconnect(username)
+  })
   const closeDialog = () => setDialog(null)
 
   return (
