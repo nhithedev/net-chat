@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { Friend } from '../../types/domain'
+import { presenceLabel } from '../../lib/format'
+import type { Friend, Relation } from '../../types/domain'
 import Avatar from '../common/Avatar'
 import Button from '../common/Button'
 import Dialog from '../common/Dialog'
@@ -9,13 +10,25 @@ import './FriendProfile.css'
 
 type FriendProfileProps = {
   friend: Friend
-  isFriend?: boolean
+  relation: Relation
   onMessage: () => void
   onRemove: (friend: Friend) => void
   onBlock: (friend: Friend) => void
+  onSendRequest: (friend: Friend) => void
+  onCancelRequest: (friend: Friend) => void
+  onAcceptRequest: (friend: Friend) => void
 }
 
-export default function FriendProfile({ friend, isFriend = true, onMessage, onRemove, onBlock }: FriendProfileProps) {
+export default function FriendProfile({
+  friend,
+  relation,
+  onMessage,
+  onRemove,
+  onBlock,
+  onSendRequest,
+  onCancelRequest,
+  onAcceptRequest,
+}: FriendProfileProps) {
   const [confirming, setConfirming] = useState(false)
 
   function remove() {
@@ -30,14 +43,18 @@ export default function FriendProfile({ friend, isFriend = true, onMessage, onRe
         title={friend.displayName}
         subtitle={`@${friend.username}`}
       >
-        <RelationBadge isFriend={isFriend} />
+        <p className="subtle">{presenceLabel(friend)}</p>
+        <RelationBadge isFriend={relation === 'friend'} />
         {friend.bio && <p>{friend.bio}</p>}
       </Hero>
       <div className="friend-profile__footer">
         <div className="divider" />
         <div className="friend-profile__actions">
           <Button onClick={onMessage}>Nhắn tin</Button>
-          {isFriend && <Button variant="outline" onClick={() => setConfirming(true)}>Hủy kết bạn</Button>}
+          {relation === 'friend' && <Button variant="outline" onClick={() => setConfirming(true)}>Hủy kết bạn</Button>}
+          {relation === 'none' && <Button variant="soft" onClick={() => onSendRequest(friend)}>Gửi kết bạn</Button>}
+          {relation === 'pending_out' && <Button variant="outline" onClick={() => onCancelRequest(friend)}>Hủy lời mời</Button>}
+          {relation === 'pending_in' && <Button variant="soft" onClick={() => onAcceptRequest(friend)}>Đồng ý kết bạn</Button>}
           <Button variant="danger" onClick={() => onBlock(friend)}>Chặn</Button>
         </div>
       </div>

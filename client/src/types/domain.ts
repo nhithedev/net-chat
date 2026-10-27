@@ -13,7 +13,11 @@ export interface User {
 
 export interface Friend extends User {
   online: boolean
+  lastSeenAt?: number // ext: users.last_seen_at (epoch ms), chỉ có ý nghĩa khi offline
 }
+
+// Quan hệ của người dùng hiện tại với một user khác (friendships + friend_requests).
+export type Relation = 'friend' | 'pending_out' | 'pending_in' | 'none'
 
 // Chỉ dùng cho mock đăng nhập: server thật không bao giờ trả mật khẩu.
 export interface Account extends User {
@@ -100,6 +104,40 @@ export interface ConversationSummary {
   ts?: number
   unread: number
   online?: boolean // chỉ có ở hội thoại 1-1
+}
+
+// activity_logs.event (schema.sql) theo danh sách sự kiện ở spec.md F-LOG-1; không ghi nội dung tin.
+export type ActivityEvent =
+  | 'connect'
+  | 'register'
+  | 'login_ok'
+  | 'login_fail'
+  | 'logout'
+  | 'disconnect'
+  | 'timeout'
+  | 'protocol_error'
+  | 'friend_request'
+  | 'friend_accept'
+  | 'friend_reject'
+  | 'friend_cancel'
+  | 'friend_remove'
+  | 'group_create'
+  | 'group_invite'
+  | 'group_join'
+  | 'group_leave'
+  | 'group_kick'
+  | 'msg_send'
+  | 'group_msg_send'
+
+export type LogDetail = Record<string, string | number> // activity_logs.detail (jsonb)
+
+export interface ActivityLogEntry {
+  id: number
+  ts: number // activity_logs.ts, epoch ms
+  connId?: number // activity_logs.conn_id (do Server C cấp)
+  username?: string // activity_logs.user_id đã đổi sang username; thiếu khi chưa xác thực
+  event: ActivityEvent
+  detail?: LogDetail
 }
 
 export type Tab = 'messages' | 'friends' | 'groups'

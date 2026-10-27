@@ -107,6 +107,12 @@
   }
 
   /* Tone: Banner, Toast, Badge dùng chung. */
+  [data-tone='neutral'] {
+    --tone-bg: var(--bg-muted);
+    --tone-fg: var(--text-muted);
+    --tone-line: var(--border);
+  }
+
   [data-tone='info'] {
     --tone-bg: var(--accent-softer);
     --tone-fg: var(--accent-strong);

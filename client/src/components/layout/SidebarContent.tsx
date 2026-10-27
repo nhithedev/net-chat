@@ -35,6 +35,7 @@ export default function SidebarContent() {
         pendingIn={pendingIn}
         pendingOut={pendingOut}
         onlineUsers={onlineUsers}
+        isFriend={(username) => state.relationOf(username) === 'friend'}
         onMessage={actions.openFriend}
         onInfo={actions.openFriendInfo}
         onAccept={actions.acceptFriend}

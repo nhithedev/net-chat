@@ -15,17 +15,20 @@ import { ErrorCode, Limits, type ErrorCodeValue, type KickReason } from '../type
 import type {
   Account,
   ActionResult,
+  ActivityEvent,
   ChatMessage,
   ConnectionStatus,
   Conversation,
   ConversationSummary,
   Friend,
   FriendFilter,
+  Relation,
   Group,
   GroupInvite,
   GroupInviteConversation,
   GroupMember,
   GroupView,
+  LogDetail,
   SystemMessage,
   Tab,
   User,
@@ -37,6 +40,7 @@ type Callbacks = {
   onKicked?: (reason: KickReason) => void
   onDisconnected?: (reason: KickReason) => void
   onBlockUser?: (user: User) => void
+  onActivity?: (event: ActivityEvent, detail?: LogDetail) => void // ghi activity_logs, không gửi nội dung tin
 }
 
 // Popup thông tin độc lập với hội thoại đang mở: xem info không làm đổi hội thoại.
@@ -90,8 +94,9 @@ function buildInviteConversation(invite: GroupInvite): GroupInviteConversation {
 export default function useChatPrototype(
   currentUser: Account,
   connectionStatus: ConnectionStatus = 'open',
-  { onKicked, onDisconnected, onBlockUser }: Callbacks = {},
+  { onKicked, onDisconnected, onBlockUser, onActivity }: Callbacks = {},
 ) {
+  const track = (event: ActivityEvent, detail?: LogDetail) => onActivity?.(event, detail)
   const hasDemoData = currentUser.username === 'demo'
   const demo = <T,>(value: T, empty: T) => (hasDemoData ? value : empty)
 
@@ -153,6 +158,13 @@ export default function useChatPrototype(
 
   const activeGroupId = activeConversation?.kind === 'group' ? activeConversation.groupId : null
   const activeGroupMembers = activeGroupId ? members[activeGroupId] ?? [] : []
+  const relationOf = (username: string): Relation => {
+    if (friends.some((user) => user.username === username)) return 'friend'
+    if (pendingOut.some((user) => user.username === username)) return 'pending_out'
+    if (pendingIn.some((user) => user.username === username)) return 'pending_in'
+    return 'none'
+  }
+
   const inviteCandidates = presenceUsers
     .filter((user) => !activeGroupMembers.some((member) => member.username === user.username))
     .map((user) => ({ ...user, isFriend: friends.some((friend) => friend.username === user.username) }))
@@ -268,6 +280,9 @@ export default function useChatPrototype(
       sending,
     }
     appendMessage(key, message)
+    const conversation = conversations[key]
+    if (conversation.kind === 'dm') track('msg_send', { to: conversation.username })
+    else if (conversation.kind === 'group') track('group_msg_send', { group_id: conversation.groupId })
     if (!sending) return
     window.setTimeout(() => {
       patchConversation(key, (conversation) => ({
@@ -283,11 +298,13 @@ export default function useChatPrototype(
   function acceptFriend(user: Friend) {
     setPendingIn((current) => removeBy(current, (item) => item.username, user.username))
     setFriends((current) => addUnique(current, user, (item) => item.username))
+    track('friend_accept', { from: user.username })
     addToast(`${user.displayName} đã trở thành bạn bè.`)
   }
 
   function rejectFriend(user: Friend) {
     setPendingIn((current) => removeBy(current, (item) => item.username, user.username))
+    track('friend_reject', { from: user.username })
   }
 
   function receiveFriendRequest(user: Friend) {
@@ -309,6 +326,7 @@ export default function useChatPrototype(
   // ext: schema.sql có friend_requests.status = 'cancelled', protocol.md chưa có lệnh hủy lời mời.
   function cancelFriendRequest(user: Friend) {
     setPendingOut((current) => removeBy(current, (item) => item.username, user.username))
+    track('friend_cancel', { to: user.username })
     addToast(`Đã hủy lời mời kết bạn tới ${user.displayName}.`)
   }
 
@@ -317,11 +335,13 @@ export default function useChatPrototype(
   }
 
   function setUserPresence(username: string, online: boolean) {
-    const setOnline = (list: Friend[]) => list.map((user) => (user.username === username ? { ...user, online } : user))
+    const setOnline = (list: Friend[]) =>
+      list.map((user) => (user.username === username ? { ...user, online, lastSeenAt: online ? user.lastSeenAt : Date.now() } : user))
     setPresenceUsers(setOnline)
     setFriends(setOnline)
     const user = presenceUsers.find((item) => item.username === username)
-    if (online && user) addToast(`${user.displayName} đang online.`)
+    // EVT_USER_ONLINE chỉ gửi cho bạn bè (protocol.md §5.2).
+    if (online && user && friends.some((friend) => friend.username === username)) addToast(`${user.displayName} đang online.`)
   }
 
   function sendFriendRequest(username: string): ActionResult {
@@ -332,6 +352,7 @@ export default function useChatPrototype(
     const known = [...friends, ...pendingIn, ...pendingOut]
     if (known.some((item) => item.username === user.username)) return { ok: false, code: ErrorCode.AlreadyExists }
     setPendingOut((current) => [...current, user])
+    track('friend_request', { to: user.username })
     addToast(`Đã gửi lời mời kết bạn tới ${user.displayName}.`)
     return { ok: true }
   }
@@ -339,6 +360,7 @@ export default function useChatPrototype(
   function removeFriend(friend: Friend) {
     setFriends((current) => removeBy(current, (item) => item.username, friend.username))
     afterFriendRemoved(friend.username)
+    track('friend_remove', { username: friend.username })
     addToast(`Đã hủy kết bạn với ${friend.displayName}.`)
   }
 
@@ -383,6 +405,7 @@ export default function useChatPrototype(
       [selfMember],
       `${currentUser.displayName} đã tạo nhóm`,
     )
+    track('group_create', { group_id: nextGroupId.current })
     addToast(`Đã tạo nhóm ${cleanName}.`)
     return { ok: true }
   }
@@ -397,6 +420,7 @@ export default function useChatPrototype(
     )
     setInvites((current) => removeBy(current, (item) => item.groupId, invite.groupId))
     setTab('groups')
+    track('group_join', { group_id: invite.groupId })
     addToast(`Đã tham gia nhóm ${invite.name}.`)
   }
 
@@ -409,10 +433,10 @@ export default function useChatPrototype(
 
   function inviteToGroup(usernames: string[]): ActionResult {
     if (!activeGroupId || activeGroupMembers.length >= Limits.groupMembersMax) return { ok: false }
-    const names = inviteCandidates
-      .filter((candidate) => usernames.includes(candidate.username))
-      .map((candidate) => candidate.displayName)
+    const invited = inviteCandidates.filter((candidate) => usernames.includes(candidate.username))
+    const names = invited.map((candidate) => candidate.displayName)
     if (!names.length) return { ok: false }
+    invited.forEach((candidate) => track('group_invite', { group_id: activeGroupId, to: candidate.username }))
     addToast(`Đã gửi lời mời nhóm tới ${names.join(', ')}.`)
     return { ok: true }
   }
@@ -428,6 +452,7 @@ export default function useChatPrototype(
   function kickMember(member: GroupMember) {
     if (activeGroupId === null) return
     removeMember(activeGroupId, member)
+    track('group_kick', { group_id: activeGroupId, username: member.username })
     addToast(`Đã xóa ${member.displayName} khỏi nhóm.`)
   }
 
@@ -436,6 +461,7 @@ export default function useChatPrototype(
     const { groupId, title } = activeConversation
     setGroups((current) => removeBy(current, (group) => group.groupId, groupId))
     leaveToTab('groups')
+    track('group_leave', { group_id: groupId })
     addToast(`Đã rời nhóm ${title}.`)
   }
 
@@ -519,8 +545,9 @@ export default function useChatPrototype(
       friends,
       pendingIn,
       pendingOut,
-      onlineUsers: presenceUsers.filter((user) => user.online),
+      onlineUsers: presenceUsers.filter((user) => user.online), // mọi user đang online, không riêng bạn bè
       userDirectory: presenceUsers,
+      relationOf,
       groups: groupViews,
       invites,
       activeInviteId: activeInvite?.groupId ?? null,

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Button from '../components/common/Button'
 import ToastHost from '../components/common/ToastHost'
+import ActivityLogToggle from '../components/layout/ActivityLogToggle'
 import AccountInsightsPanel from '../components/settings/AccountInsightsPanel'
 import ChangePasswordDialog from '../components/settings/ChangePasswordDialog'
 import DeleteAccountDialog from '../components/settings/DeleteAccountDialog'
@@ -36,8 +37,9 @@ export default function UserLayout({ user, blockedUsers, onBack, onUserChange, o
   return (
     <main className="user-layout">
       <header className="row user-layout__header">
-        <Button shape="icon" variant="ghost" icon="back" ariaLabel="Quay lại màn chính" onClick={onBack} />
-        <h1>Tài khoản của tôi</h1>
+        <Button shape="icon" variant="outline" icon="back" ariaLabel="Quay lại màn chính" onClick={onBack} />
+        <h1 className="grow">Tài khoản của tôi</h1>
+        <ActivityLogToggle />
       </header>
       <div className="user-layout__grid">
         <ProfilePanel

@@ -2,6 +2,10 @@ import { useState } from 'react'
 import SessionRestoring from './components/auth/SessionRestoring'
 import DisconnectedScreen from './components/feedback/DisconnectedScreen'
 import KickedScreen from './components/feedback/KickedScreen'
+import ActivityLogPanel from './components/layout/ActivityLogPanel'
+import { ActivityLogContext } from './hooks/ActivityLogContext'
+import useActivityLogStore from './hooks/useActivityLogStore'
+import { eventForKick } from './lib/activity'
 import { addUnique, removeBy } from './lib/list'
 import AuthPage from './pages/AuthPage'
 import ChatPage from './pages/ChatPage'
@@ -20,11 +24,19 @@ export default function App() {
   const [fatalState, setFatalState] = useState<FatalState | null>(null)
   const [restoring, setRestoring] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState<User[]>([])
+  const activity = useActivityLogStore(currentUser?.username)
 
+  // Quay về màn đăng nhập = đóng kết nối cũ, lần sau là kết nối mới.
   function logout() {
     setCurrentUser(null)
     setScreen('chat')
     setFatalState(null)
+    activity.connect()
+  }
+
+  function fail(kind: FatalState['kind'], reason: KickReason) {
+    activity.log(eventForKick(reason), { detail: { reason } })
+    setFatalState({ kind, reason })
   }
 
   function retryConnection() {
@@ -33,39 +45,52 @@ export default function App() {
     window.setTimeout(() => setRestoring(false), RESTORE_MS)
   }
 
-  if (fatalState?.kind === 'kicked') return <KickedScreen onLogin={logout} />
-  if (fatalState?.kind === 'disconnected') return <DisconnectedScreen reason={fatalState.reason} onRetry={retryConnection} />
-  if (restoring) return <SessionRestoring />
+  function renderPage() {
+    if (fatalState?.kind === 'kicked') return <KickedScreen onLogin={logout} />
+    if (fatalState?.kind === 'disconnected') return <DisconnectedScreen reason={fatalState.reason} onRetry={retryConnection} />
+    if (restoring) return <SessionRestoring />
 
-  if (!currentUser) {
-    return <AuthPage registeredAccount={registeredAccount} onRegistered={setRegisteredAccount} onAuthenticated={setCurrentUser} />
-  }
+    if (!currentUser) {
+      return <AuthPage registeredAccount={registeredAccount} onRegistered={setRegisteredAccount} onAuthenticated={setCurrentUser} />
+    }
 
-  if (screen === 'account') {
+    if (screen === 'account') {
+      return (
+        <UserLayout
+          user={currentUser}
+          blockedUsers={blockedUsers}
+          onBack={() => setScreen('chat')}
+          onUserChange={setCurrentUser}
+          onUnblock={(user) => setBlockedUsers((current) => removeBy(current, (item) => item.username, user.username))}
+          onLogout={() => {
+            activity.log('logout')
+            logout()
+          }}
+          onDelete={() => {
+            activity.log('logout')
+            setRegisteredAccount(null)
+            logout()
+          }}
+        />
+      )
+    }
+
     return (
-      <UserLayout
+      <ChatPage
         user={currentUser}
-        blockedUsers={blockedUsers}
-        onBack={() => setScreen('chat')}
-        onUserChange={setCurrentUser}
-        onUnblock={(user) => setBlockedUsers((current) => removeBy(current, (item) => item.username, user.username))}
-        onLogout={logout}
-        onDelete={() => {
-          setRegisteredAccount(null)
-          logout()
-        }}
+        onSessionExpired={logout}
+        onOpenAccount={() => setScreen('account')}
+        onKicked={(reason) => fail('kicked', reason)}
+        onDisconnected={(reason) => fail('disconnected', reason)}
+        onBlockUser={(user) => setBlockedUsers((current) => addUnique(current, user, (item) => item.username))}
       />
     )
   }
 
   return (
-    <ChatPage
-      user={currentUser}
-      onSessionExpired={logout}
-      onOpenAccount={() => setScreen('account')}
-      onKicked={(reason) => setFatalState({ kind: 'kicked', reason })}
-      onDisconnected={(reason) => setFatalState({ kind: 'disconnected', reason })}
-      onBlockUser={(user) => setBlockedUsers((current) => addUnique(current, user, (item) => item.username))}
-    />
+    <ActivityLogContext.Provider value={activity}>
+      {renderPage()}
+      <ActivityLogPanel />
+    </ActivityLogContext.Provider>
   )
 }

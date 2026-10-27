@@ -12,19 +12,21 @@ function at(hour: number, minute: number, daysAgo = 0): number {
   return date.getTime()
 }
 
+const ago = (minutes: number) => Date.now() - minutes * 60 * 1000
+
 export const demoFriends: Friend[] = [
   { username: 'thuha', displayName: 'Thu Hà', online: true, bio: 'Yêu sách, cà phê và những khu vườn yên tĩnh.' },
   { username: 'minhan', displayName: 'Minh An', online: true, bio: 'Roaster và người thích những cuộc trò chuyện dài.' },
-  { username: 'binh', displayName: 'Bình Nguyễn', online: false, bio: 'Đang ngoại tuyến.' },
+  { username: 'binh', displayName: 'Bình Nguyễn', online: false, lastSeenAt: ago(95), bio: 'Đang ngoại tuyến.' },
 ]
 
 export const userDirectory: Friend[] = [
   ...demoFriends,
   { username: 'chi', displayName: 'Chi Lê', online: true, bio: 'Đọc sách và thiết kế.' },
   { username: 'linh', displayName: 'Linh Phạm', online: true, bio: 'Thành viên mới của cộng đồng.' },
-  { username: 'nam', displayName: 'Nam Hoàng', online: false, bio: 'Thích nhiếp ảnh đường phố.' },
+  { username: 'nam', displayName: 'Nam Hoàng', online: false, lastSeenAt: ago(60 * 26), bio: 'Thích nhiếp ảnh đường phố.' },
   { username: 'lan', displayName: 'Lan Vũ', online: true, bio: 'Đang học thiết kế sản phẩm.' },
-  { username: 'huy', displayName: 'Huy Trần', online: false, bio: 'Yêu âm nhạc và công nghệ.' },
+  { username: 'huy', displayName: 'Huy Trần', online: false, lastSeenAt: ago(7), bio: 'Yêu âm nhạc và công nghệ.' },
   { username: 'mai', displayName: 'Mai Đỗ', online: true, bio: 'Thích đọc và viết mỗi ngày.' },
 ]
 

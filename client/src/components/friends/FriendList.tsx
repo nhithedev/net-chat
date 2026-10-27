@@ -12,6 +12,7 @@ type FriendListProps = {
   pendingIn: Friend[]
   pendingOut: Friend[]
   onlineUsers: Friend[]
+  isFriend: (username: string) => boolean
   onMessage: (friend: Friend) => void
   onInfo: (friend: Friend) => void
   onAccept: (user: Friend) => void
@@ -25,13 +26,14 @@ export default function FriendList({
   pendingIn,
   pendingOut,
   onlineUsers,
+  isFriend,
   onMessage,
   onInfo,
   onAccept,
   onReject,
   onCancel,
 }: FriendListProps) {
-  if (view === 'online') return <OnlineList users={onlineUsers} onSelect={onInfo} />
+  if (view === 'online') return <OnlineList users={onlineUsers} isFriend={isFriend} onSelect={onInfo} />
 
   if (view === 'requests') {
     return (

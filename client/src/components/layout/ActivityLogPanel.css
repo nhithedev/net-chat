@@ -1,0 +1,76 @@
+/* Nổi trên mọi trang (dưới toast, trên dialog) và kéo/đổi cỡ được. */
+.log-panel {
+  position: fixed;
+  z-index: 55;
+  top: 72px;
+  right: var(--space-5);
+  display: flex;
+  width: 460px;
+  height: 320px;
+  min-width: 300px;
+  min-height: 160px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  flex-direction: column;
+  resize: both;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.log-panel__header {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  --gap: var(--space-2);
+}
+
+.log-panel__header:active {
+  cursor: grabbing;
+}
+
+.log-panel__header h2 {
+  font: 700 14px/20px var(--font);
+}
+
+.log-panel__list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  font: 12px/18px var(--font-mono);
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 8ch 5ch minmax(0, 12ch) 15ch minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 1px 0;
+  color: var(--text-muted);
+}
+
+.log-line__time {
+  color: var(--text-subtle);
+}
+
+.log-line__user {
+  color: var(--text);
+}
+
+.log-line__event {
+  width: fit-content;
+  border-radius: var(--radius-sm);
+  background: var(--tone-bg);
+  padding: 0 var(--space-2);
+  color: var(--tone-fg);
+}
+
+.log-line__detail {
+  color: var(--text-subtle);
+}

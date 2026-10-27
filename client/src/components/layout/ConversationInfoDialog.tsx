@@ -15,7 +15,7 @@ export default function ConversationInfoDialog({ currentUser, onInvite }: Conver
   const target = state.infoTarget
   if (!target) return null
 
-  const isFriend = (username: string) => state.friends.some((friend) => friend.username === username)
+  const isFriend = (username: string) => state.relationOf(username) === 'friend'
 
   if (target.kind === 'group') {
     const group = state.groups.find((item) => item.groupId === target.groupId)
@@ -44,10 +44,13 @@ export default function ConversationInfoDialog({ currentUser, onInvite }: Conver
     <Dialog open title="Thông tin người dùng" size="lg" onClose={actions.closeInfo}>
       <FriendProfile
         friend={friend}
-        isFriend={isFriend(friend.username)}
+        relation={state.relationOf(friend.username)}
         onMessage={() => actions.openFriend(friend)}
         onRemove={actions.removeFriend}
         onBlock={actions.blockFriend}
+        onSendRequest={(user) => actions.sendFriendRequest(user.username)}
+        onCancelRequest={actions.cancelFriendRequest}
+        onAcceptRequest={actions.acceptFriend}
       />
     </Dialog>
   )
