@@ -1,0 +1,48 @@
+# Build output (C)
+build/
+bin/
+*.o
+*.a
+*.so
+*.d
+*.out
+a.out
+
+# Debug / profiling
+core
+core.*
+vgcore.*
+*.gcda
+*.gcno
+*.gcov
+callgrind.out.*
+
+# Database (dữ liệu chạy thử, không commit)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Log
+*.log
+
+# Node.js (gateway + React)
+node_modules/
+dist/
+.env
+.env.*
+npm-debug.log*
+
+# Secrets
+*.pem
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+*:Zone.Identifier
