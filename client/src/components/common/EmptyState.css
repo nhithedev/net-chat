@@ -1,0 +1,31 @@
+.empty-state {
+  display: grid;
+  min-height: 100%;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 32px;
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+.empty-state__image {
+  width: 112px;
+  height: 112px;
+  margin-bottom: var(--space-2);
+  object-fit: contain;
+}
+
+.empty-state[data-compact] {
+  padding: var(--space-6) 18px;
+}
+
+.empty-state[data-compact] .empty-state__image {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 0;
+}
+
+.empty-state[data-compact] h2 {
+  font: 700 14px/20px var(--font);
+}

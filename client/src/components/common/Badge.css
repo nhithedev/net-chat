@@ -1,0 +1,27 @@
+.badge {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--notify);
+  padding: 0 6px;
+  color: var(--bg-surface);
+  font: var(--text-small); /* cùng font với timestamp */
+  text-align: center;
+  white-space: nowrap;
+}
+
+.badge[data-variant='muted'] {
+  background: var(--bg-muted);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.badge[data-variant='accent'] {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 400;
+}

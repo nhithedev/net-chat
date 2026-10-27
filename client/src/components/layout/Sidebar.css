@@ -1,0 +1,118 @@
+.sidebar {
+  display: grid;
+  width: 360px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.sidebar > header {
+  padding: 14px var(--space-4) 10px 18px;
+}
+
+.sidebar__brand {
+  color: var(--accent-strong);
+  font: var(--text-title);
+}
+
+.sidebar__account {
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  padding: 2px;
+}
+
+.sidebar-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-1);
+  margin: 0 14px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-muted);
+  padding: var(--space-1);
+}
+
+.sidebar-tabs__item {
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  padding: 9px 6px;
+  color: var(--text-muted); /* trên nền rail --bg-muted */
+  font: var(--text-small);
+  --gap: 6px;
+}
+
+.sidebar-tabs__item[aria-current='true'] {
+  border-color: var(--border);
+  background: var(--bg-surface);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.sidebar__search {
+  position: relative;
+  z-index: 12;
+  align-items: flex-end;
+  padding: 0 14px 12px;
+}
+
+.sidebar__content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 10px 10px;
+}
+
+/* Menu lọc bạn bè: mở khi hover/focus. */
+.filter-menu {
+  position: relative;
+}
+
+.filter-menu__dropdown {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  right: 0;
+  display: grid;
+  width: 210px;
+  gap: var(--space-1);
+  visibility: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 10px;
+  opacity: 0;
+  box-shadow: var(--shadow-md);
+  transform: translateY(5px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+}
+
+.filter-menu:hover .filter-menu__dropdown,
+.filter-menu:focus-within .filter-menu__dropdown {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.filter-menu__option {
+  width: 100%;
+  border-radius: var(--radius-pill);
+  padding: 9px var(--space-3);
+  color: var(--text-subtle);
+  font: var(--text-small);
+  text-align: left;
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    width: 100%;
+  }
+}

@@ -1,0 +1,13 @@
+.screen {
+  display: grid;
+  width: 100%;
+  min-height: 100dvh;
+  place-items: center;
+  background: var(--bg-subtle);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.screen__card {
+  width: min(100%, 430px);
+}

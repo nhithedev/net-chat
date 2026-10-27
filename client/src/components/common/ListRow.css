@@ -1,0 +1,40 @@
+.list-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+}
+
+.list-row__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+button.list-row__main {
+  cursor: pointer;
+}
+
+.list-row__text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Hover/đang chọn đổi nền sang accent-soft: chữ phụ đậm hơn. */
+.list-row:hover .list-row__text small,
+.list-row[aria-current='true'] .list-row__text small {
+  color: var(--text-muted);
+}
+
+.list-row__title {
+  color: var(--text);
+}

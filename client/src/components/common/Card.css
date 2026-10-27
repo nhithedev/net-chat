@@ -1,0 +1,21 @@
+.card--col {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+}
+
+.card__head {
+  justify-content: space-between;
+}
+
+/* Trong card dạng cột: đẩy xuống đáy / căn giữa phần còn lại. */
+.card__foot {
+  margin-top: auto;
+}
+
+.card__empty {
+  margin: auto;
+  text-align: center;
+}
