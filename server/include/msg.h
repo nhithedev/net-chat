@@ -100,12 +100,13 @@ bool        msg_type_needs_auth(msg_type_t t);
 typedef struct msg_request msg_request_t;           /* opaque, giữ cây JSON */
 
 /*
- * Parse 1 payload. Kiểm tra: JSON hợp lệ, là object, có "type" (chuỗi) và
- * "id" (chuỗi, không rỗng), "data" nếu có phải là object.
- * Trả NULL nếu hỏng; khi đó *err_out = ERR_BAD_REQUEST và, nếu lấy được,
- * *id_out là id (để trả lỗi đúng id; caller không free, hợp lệ tới khi
- * parse lần sau). Type lạ vẫn parse được (type = MSG_UNKNOWN) để handler
- * chung trả ERR_BAD_REQUEST kèm id.
+ * Parse 1 payload. Trả NULL (và *err_out = ERR_BAD_REQUEST) chỉ khi payload
+ * không phải một JSON object hợp lệ. Nếu là object thì luôn trả về request,
+ * kể cả khi thiếu "type"/"id" hay "type" lạ (msg_req_type = MSG_UNKNOWN),
+ * để còn trả lỗi kèm đúng id. msg_dispatch tự kiểm tra các trường hợp đó;
+ * handler luôn nhận request đã hợp lệ: "type" biết, "id" là chuỗi không
+ * rỗng (riêng PING có thể không có id: msg_req_id trả NULL), "data" (nếu
+ * có) là object.
  */
 msg_request_t *msg_parse(const char *payload, uint32_t len,
                          err_code_t *err_out);
@@ -146,7 +147,8 @@ void jb_add_str (json_builder_t *arr, const char *v);
 void jb_free(json_builder_t *j);                    /* chỉ khi chưa gắn vào cha */
 
 /*
- * Các hàm build_* trả chuỗi malloc'd (caller free), *out_len là độ dài.
+ * Các hàm build_* trả chuỗi malloc'd (caller free), *out_len là độ dài
+ * (có thể truyền NULL nếu không cần; chuỗi luôn NUL-terminated).
  * `data` được SỞ HỮU bởi hàm (đã gắn vào kết quả); truyền NULL nếu không có.
  * Trả NULL nếu hết bộ nhớ.
  */
@@ -200,13 +202,23 @@ typedef void (*msg_handler_t)(net_conn_t *c, const msg_request_t *req);
 void msg_register_handler(msg_type_t t, msg_handler_t h);
 
 /*
+ * Cho msg biết kết nối đã xác thực chưa (do tầng session cài vào).
+ * Chưa cài (NULL) thì mọi kết nối coi như chưa đăng nhập.
+ */
+typedef int (*msg_auth_fn)(net_conn_t *c);
+void msg_set_auth_fn(msg_auth_fn f);
+
+/*
  * Điểm vào duy nhất từ net: dán thẳng vào net_callbacks_t.on_payload.
- *   1. msg_parse            -> lỗi: reply ERR_BAD_REQUEST
- *   2. type lạ              -> reply ERR_BAD_REQUEST
- *   3. needs_auth && chưa đăng nhập -> reply ERR_NOT_AUTHENTICATED
- *   4. rate limit 20 msg/s  -> reply ERR_RATE_LIMIT
- *   5. PING                 -> PONG (xử lý sẵn)
- *   6. gọi handler đã đăng ký
+ *   1. msg_parse                    -> không phải JSON object: ERR_BAD_REQUEST
+ *   2. rate limit 20 msg/s          -> ERR_RATE_LIMIT
+ *   3. "PONG" từ client             -> bỏ qua (không trả lời)
+ *   4. thiếu type/id, sai kiểu data -> ERR_BAD_REQUEST (PING được thiếu id)
+ *      type lạ                      -> ERR_BAD_REQUEST
+ *   5. needs_auth && chưa đăng nhập -> ERR_NOT_AUTHENTICATED
+ *   6. PING chưa có handler riêng   -> PONG (xử lý sẵn)
+ *   7. gọi handler đã đăng ký       -> chưa đăng ký: ERR_INTERNAL
+ * Request chỉ sống trong lúc handler chạy; muốn giữ thì copy dữ liệu ra.
  */
 void msg_dispatch(net_conn_t *c, const char *payload, uint32_t len,
                   void *userdata);

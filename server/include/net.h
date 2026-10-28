@@ -24,8 +24,12 @@
 #define NET_MAX_PAYLOAD     65536u          /* length hợp lệ: 1..65536 */
 #define NET_HEADER_LEN      4u
 #define NET_SENDQ_MAX       (1024u * 1024u) /* vượt thì đóng kết nối */
-#define NET_AUTH_TIMEOUT_S  30              /* chưa xác thực */
+#ifndef NET_AUTH_TIMEOUT_S
+#define NET_AUTH_TIMEOUT_S  30              /* chưa xác thực (tính từ lúc kết nối) */
+#endif
+#ifndef NET_IDLE_TIMEOUT_S
 #define NET_IDLE_TIMEOUT_S  60              /* không nhận byte nào */
+#endif
 
 typedef struct net_server net_server_t;
 typedef struct net_conn   net_conn_t;       /* opaque; chỉ dùng qua API dưới */
@@ -40,11 +44,19 @@ typedef enum {
     FRAME_ERROR     = -1   /* length == 0 hoặc > NET_MAX_PAYLOAD */
 } frame_status_t;
 
-/* Bộ đệm nhận của một kết nối. Chịu được header bị cắt, nhiều frame/recv. */
+/*
+ * Bộ đệm nhận của một kết nối. Chịu được header bị cắt, nhiều frame/recv.
+ * Bố cục: buf[0..off) đã trả cho caller, buf[off..len) chưa xử lý.
+ * Các trường dưới đây là nội bộ, đừng đọc/ghi trực tiếp.
+ */
 typedef struct {
     uint8_t *buf;
     size_t   len;          /* số byte đang có */
-    size_t   cap;         
+    size_t   cap;
+    size_t   off;          /* đầu vùng chưa xử lý */
+    size_t   restore_pos;  /* vị trí byte bị ghi đè bằng '\0' ... */
+    uint8_t  restore_byte; /* ... và giá trị gốc của nó */
+    int      has_restore;
 } frame_decoder_t;
 
 void frame_decoder_init(frame_decoder_t *d);
@@ -107,7 +119,10 @@ typedef struct {
  * 3. Vòng đời server
  * ================================================================ */
 
-/* port mặc định 9000. Trả NULL nếu lỗi (errno/log đã ghi). */
+/*
+ * port = 0 nghĩa là cổng mặc định 9000. on_payload bắt buộc phải khác NULL,
+ * các callback khác có thể NULL. Trả NULL nếu lỗi (errno/log đã ghi).
+ */
 net_server_t *net_server_create(uint16_t port, const net_callbacks_t *cb);
 
 /* Chạy vòng epoll; chặn tới khi net_server_stop(). Trả 0 nếu thoát sạch. */
@@ -130,6 +145,19 @@ const char *net_conn_peer(const net_conn_t *c);   /* "ip:port" */
 /* Con trỏ tuỳ ý tầng trên gắn vào kết nối (session). net không free. */
 void  net_conn_set_data(net_conn_t *c, void *p);
 void *net_conn_get_data(const net_conn_t *c);
+
+/*
+ * Đếm 1 message nhận được trong giây hiện tại (cửa sổ cố định 1 giây).
+ * Trả 1 nếu còn trong hạn mức max_per_sec, 0 nếu vượt (-> ERR_RATE_LIMIT).
+ */
+int net_conn_rate_check(net_conn_t *c, unsigned max_per_sec);
+
+/*
+ * Log ra stderr: "2026-10-27 23:10:11 conn=17 nội dung". c = NULL thì in
+ * "conn=-". Dùng chung cho mọi tầng để log có cùng định dạng.
+ */
+void net_log(const net_conn_t *c, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 /*
  * Đưa 1 payload vào hàng đợi gửi (net tự thêm header 4 byte rồi copy).
