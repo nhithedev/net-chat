@@ -234,7 +234,7 @@ Event:
 ] } }
 ```
 
-- Mỗi batch tối đa 100 tin, sắp theo `ts` tăng dần.
+- Mỗi batch tối đa 100 tin, sắp theo `msg_id` tăng dần (cùng thứ tự với `ts` vì `msg_id` do server cấp tăng dần; dùng `msg_id` để `up_to_msg_id` của `OFFLINE_ACK` luôn đúng).
 - Client xử lý xong thì gửi `OFFLINE_ACK` để server đánh dấu đã giao:
 
 | Type | `data` request | `data` response (ok) |
@@ -366,3 +366,4 @@ Bình S→C {"type":"EVT_USER_OFFLINE","data":{"username":"an"}}
 | Ngày | Thay đổi | Người sửa |
 |---|---|---|
 | 2026-10-26 | Bản nháp đầu tiên (v1) | |
+| 2026-10-28 | Batch tin offline sắp theo `msg_id` thay vì `ts` | |

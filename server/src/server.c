@@ -3,6 +3,7 @@
  * REGISTER, LOGIN); handler nghiệp vụ khác sẽ đăng ký thêm ở đây.
  *
  * Dùng: netchat-server [port]     (mặc định 9000)
+ * DB:   biến môi trường NETCHAT_DB = conninfo libpq (mặc định chat@127.0.0.1:5432)
  */
 #include <signal.h>
 #include <stdio.h>
@@ -11,6 +12,7 @@
 #include "auth.h"
 #include "msg.h"
 #include "net.h"
+#include "store.h"
 
 static net_server_t *g_server;
 
@@ -33,6 +35,12 @@ int main(int argc, char **argv)
         port = (uint16_t)p;
     }
 
+    const char *dsn = getenv("NETCHAT_DB");
+    if (!dsn || !*dsn)
+        dsn = "host=127.0.0.1 port=5432 dbname=chat user=chat password=chat";
+    if (!store_init(dsn))
+        return 1;
+
     net_callbacks_t cb = {
         .on_payload = msg_dispatch,      /* mọi payload đi qua msg */
         .on_close   = auth_net_on_close,
@@ -41,8 +49,10 @@ int main(int argc, char **argv)
     auth_init();
 
     g_server = net_server_create(port, &cb);
-    if (!g_server)
+    if (!g_server) {
+        store_shutdown();
         return 1;
+    }
 
     struct sigaction sa = { .sa_handler = on_signal };   /* không SA_RESTART */
     sigemptyset(&sa.sa_mask);
@@ -52,5 +62,6 @@ int main(int argc, char **argv)
     int rc = net_server_run(g_server);
     net_log(NULL, "đang tắt server");
     net_server_destroy(g_server);
+    store_shutdown();
     return rc == 0 ? 0 : 1;
 }

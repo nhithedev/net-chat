@@ -13,6 +13,14 @@ import tempfile
 import time
 import unittest
 
+RUN_ID = "%05x" % (int(time.time() * 1000) & 0xFFFFF)
+
+
+def uname(base):
+    """Username duy nhất mỗi lần chạy (user nằm lại trong DB); tối đa 20 ký tự."""
+    return (base + "_" + RUN_ID)[:20]
+
+
 SERVER = None
 SERVER_FAST = None
 
@@ -380,11 +388,11 @@ class AuthTest(unittest.TestCase):
 
     def test_register_then_login(self):
         c = self.client()
-        r = self.register(c, "an_test", name="Ân")
+        r = self.register(c, uname("an_test"), name="Ân")
         self.assertEqual((r["type"], r["id"], r["ok"]), ("REGISTER_RES", "c-1", True))
-        r = self.call(c, "LOGIN", {"username": "AN_Test", "password": "123456"}, "c-2")
+        r = self.call(c, "LOGIN", {"username": uname("an_test").upper(), "password": "123456"}, "c-2")
         self.assertTrue(r["ok"], r)
-        self.assertEqual(r["data"]["username"], "an_test")
+        self.assertEqual(r["data"]["username"], uname("an_test"))
         self.assertEqual(r["data"]["display_name"], "Ân")
         self.assertRegex(r["data"]["token"], r"^[0-9a-f]{64}$")
         evt = c.recv_msg()
@@ -395,8 +403,8 @@ class AuthTest(unittest.TestCase):
 
     def test_register_duplicate(self):
         c = self.client()
-        self.assertTrue(self.register(c, "dup_user")["ok"])
-        r = self.register(c, "DUP_USER")
+        self.assertTrue(self.register(c, uname("dup_user"))["ok"])
+        r = self.register(c, uname("dup_user").upper())
         self.assertEqual(r["error"]["code"], 6)
 
     def test_register_validation(self):
@@ -415,21 +423,21 @@ class AuthTest(unittest.TestCase):
 
     def test_login_errors(self):
         c = self.client()
-        self.register(c, "err_user")
-        r = self.call(c, "LOGIN", {"username": "nobody_x", "password": "123456"})
+        self.register(c, uname("err_user"))
+        r = self.call(c, "LOGIN", {"username": uname("nobody"), "password": "123456"})
         self.assertEqual(r["error"]["code"], 1001)
-        r = self.call(c, "LOGIN", {"username": "err_user", "password": "wrong!!"})
+        r = self.call(c, "LOGIN", {"username": uname("err_user"), "password": "wrong!!"})
         self.assertEqual(r["error"]["code"], 1002)
-        r = self.call(c, "LOGIN", {"username": "err_user"})
+        r = self.call(c, "LOGIN", {"username": uname("err_user")})
         self.assertEqual(r["error"]["code"], 1)
 
     def test_login_elsewhere_kicks_old_connection(self):
         a, b = self.client(), self.client()
-        self.register(a, "kick_user")
-        self.assertTrue(self.call(a, "LOGIN", {"username": "kick_user",
+        self.register(a, uname("kick_user"))
+        self.assertTrue(self.call(a, "LOGIN", {"username": uname("kick_user"),
                                                "password": "123456"})["ok"])
         a.recv_msg()  # EVT_OFFLINE_MSGS
-        self.assertTrue(self.call(b, "LOGIN", {"username": "kick_user",
+        self.assertTrue(self.call(b, "LOGIN", {"username": uname("kick_user"),
                                                "password": "123456"})["ok"])
         r = a.recv_msg()
         self.assertEqual(r, {"type": "EVT_KICKED", "data": {"reason": "login_elsewhere"}})
@@ -441,10 +449,10 @@ class AuthTest(unittest.TestCase):
 
     def test_second_login_on_same_connection_rejected(self):
         c = self.client()
-        self.register(c, "twice_user")
-        self.call(c, "LOGIN", {"username": "twice_user", "password": "123456"})
+        self.register(c, uname("twice_user"))
+        self.call(c, "LOGIN", {"username": uname("twice_user"), "password": "123456"})
         c.recv_msg()
-        r = self.call(c, "LOGIN", {"username": "twice_user", "password": "123456"})
+        r = self.call(c, "LOGIN", {"username": uname("twice_user"), "password": "123456"})
         self.assertEqual(r["error"]["code"], 1)
 
 

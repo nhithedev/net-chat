@@ -1,6 +1,6 @@
 # Đặc tả chức năng hệ thống Chat
 
-Tài liệu này mô tả **hệ thống làm gì**. Giao thức chi tiết (khung dữ liệu, message, mã lỗi) nằm ở [protocol.md](protocol.md); tài liệu này tham chiếu tới nó thay vì lặp lại.
+Tài liệu này mô tả **hệ thống làm gì**. Giao thức chi tiết (khung dữ liệu, message, mã lỗi) nằm ở [protocol.md](protocol.md); tài liệu này tham chiếu tới nó thay vì lặp lại. Khi có chênh lệch về số liệu hoặc tên message, **protocol.md là bản chuẩn**.
 
 ## 1. Mục tiêu và phạm vi
 
@@ -25,7 +25,7 @@ React (trình duyệt) --WebSocket--> Gateway (Node.js) --TCP--> Server C (epoll
 
 ## 3. Tác nhân
 
-- **Khách (chưa đăng nhập):** chỉ đăng ký, đăng nhập, khôi phục phiên.
+- **Khách (chưa đăng nhập):** chỉ đăng ký, đăng nhập, khôi phục phiên (và `PING`).
 - **Người dùng:** dùng mọi chức năng sau khi xác thực.
 - **Owner nhóm:** người dùng có thêm quyền đuổi thành viên.
 
@@ -98,7 +98,7 @@ Mức ưu tiên: **P0** = bắt buộc theo đề; **P1** = nên có; **P2** = c
 | Mã | Yêu cầu | Message |
 |---|---|---|
 | F-OFF-1 | Tin gửi cho người không có kết nối (1-1 hoặc nhóm) được lưu với trạng thái chưa giao. | — |
-| F-OFF-2 | Ngay sau `LOGIN`/`RESUME` thành công, server đẩy tin chưa giao theo batch ≤ 100, sắp theo thời gian. | `EVT_OFFLINE_MSGS` |
+| F-OFF-2 | Ngay sau `LOGIN`/`RESUME` thành công, server đẩy tin chưa giao theo batch (kích thước theo protocol), sắp theo `msg_id` tăng dần. | `EVT_OFFLINE_MSGS` |
 | F-OFF-3 | Client xác nhận bằng `OFFLINE_ACK`; server đánh dấu đã giao và đẩy batch kế. Chưa ACK thì gửi lại lần sau (giao ít nhất một lần, client khử trùng theo `msg_id`). | `OFFLINE_ACK` |
 
 ### 4.8 Ghi log hoạt động (P0)
@@ -132,14 +132,14 @@ Gợi ý theo độ khả thi: chỉ báo "đang gõ"; badge số tin chưa đ�
 |---|---|
 | NF-1 | Server C dùng `epoll` không chặn, một luồng xử lý được nhiều kết nối đồng thời. |
 | NF-2 | Xử lý đúng TCP là luồng byte: nhiều message trong một `recv`, một message chia nhiều `recv`, header bị cắt. |
-| NF-3 | Giới hạn: payload ≤ 65536 byte, 20 message/giây/kết nối, hàng đợi gửi ≤ 1 MB/kết nối (vượt thì đóng). |
+| NF-3 | Tuân thủ các giới hạn ở mục 7 của [protocol.md](protocol.md) (kích thước payload, tốc độ gửi, hàng đợi gửi...); vượt hàng đợi thì đóng kết nối. |
 | NF-4 | Dọn tài nguyên đúng khi `recv` trả 0 hoặc lỗi: không rò fd/bộ nhớ, bạn bè và người đang chat được báo. |
 | NF-5 | Ghi DB bằng transaction ngắn; lỗi DB trả `ERR_INTERNAL`, không làm sập server. |
 | NF-6 | Gateway không sửa nội dung; mất một bên thì đóng bên kia. |
 
 ## 6. Dữ liệu cần lưu (mức khái niệm)
 
-Thiết kế bảng cụ thể sẽ làm riêng. Các thực thể cần có:
+Thiết kế bảng cụ thể nằm ở [schema.sql](schema.sql). Các thực thể cần có:
 
 - **Người dùng:** username, tên hiển thị, băm mật khẩu, salt.
 - **Phiên:** token, user, hạn sử dụng.

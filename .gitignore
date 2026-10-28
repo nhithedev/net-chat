@@ -1,5 +1,6 @@
 # Build output (C)
 build/
+build-asan/
 bin/
 *.o
 *.a

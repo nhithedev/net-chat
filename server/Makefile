@@ -6,7 +6,8 @@
 CC      ?= gcc
 CFLAGS  ?= -O2 -g
 WARN    := -std=gnu11 -Wall -Wextra -Wshadow
-INC     := -Iinclude -IcJSON
+PGINC   := $(shell pg_config --includedir 2>/dev/null || echo /usr/include/postgresql)
+INC     := -Iinclude -IcJSON -I$(PGINC)
 BUILD   := build
 
 LIB_SRC := src/net.c src/msg.c
@@ -19,7 +20,7 @@ FAST_OBJ := $(BUILD)/fast/net.o $(BUILD)/fast/msg.o $(APP_SRC:%=$(BUILD)/fast/%.
 all: $(BUILD)/netchat-server $(BUILD)/netchat-client
 
 $(BUILD)/netchat-server: $(BUILD)/server.o $(LIB_OBJ) $(APP_OBJ)
-	$(CC) $(CFLAGS) $^ -lm -lcrypto -o $@
+	$(CC) $(CFLAGS) $^ -lm -lcrypto -lpq -o $@
 
 # client dòng lệnh để thử tay; chỉ cần phần framing của net.c
 $(BUILD)/netchat-client: $(BUILD)/client.o $(BUILD)/net.o
@@ -27,7 +28,7 @@ $(BUILD)/netchat-client: $(BUILD)/client.o $(BUILD)/net.o
 
 # bản có timeout ngắn (2s chưa đăng nhập, 4s im lặng) để test nhanh
 $(BUILD)/netchat-server-fast: $(BUILD)/fast/server.o $(FAST_OBJ)
-	$(CC) $(CFLAGS) $^ -lm -lcrypto -o $@
+	$(CC) $(CFLAGS) $^ -lm -lcrypto -lpq -o $@
 
 $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) $(WARN) $(INC) -MMD -c $< -o $@

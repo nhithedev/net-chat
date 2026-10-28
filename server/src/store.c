@@ -1,25 +1,23 @@
 /*
- * store.c - mock lưu trữ trong RAM (xem store.h). Tìm tuyến tính: đủ cho
- * thử nghiệm; bản PostgreSQL sẽ thay toàn bộ file này.
+ * store.c - lưu user/token vào PostgreSQL bằng libpq (xem store.h).
+ *
+ * Mọi câu lệnh dùng PQexecParams với tham số $1.. (không nối chuỗi SQL).
+ * PQexecParams chặn thread; chấp nhận được vì server một thread và DB cùng máy.
  */
 #include "store.h"
 
 #include <openssl/crypto.h>
+#include <libpq-fe.h>
 #include <openssl/sha.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
 
-typedef struct {
-    char          token[STORE_TOKEN_HEX_LEN + 1];
-    store_user_t *user;
-} token_entry_t;
-
-static store_user_t  **g_users;         /* mảng con trỏ: địa chỉ user không đổi khi realloc */
+static PGconn         *g_db;
+/* Cache user đã tải: mảng con trỏ nên địa chỉ user không đổi khi realloc. */
+static store_user_t  **g_users;
 static size_t          g_users_n, g_users_cap;
-static token_entry_t  *g_tokens;
-static size_t          g_tokens_n, g_tokens_cap;
 
 static void to_hex(const unsigned char *in, size_t n, char *out)
 {
@@ -64,7 +62,7 @@ static bool hash_password(const char *salt, const char *password, char *out)
     return true;
 }
 
-store_user_t *store_user_find(const char *username)
+static store_user_t *cache_find(const char *username)
 {
     for (size_t i = 0; i < g_users_n; i++)
         if (strcmp(g_users[i]->username, username) == 0)
@@ -72,35 +70,119 @@ store_user_t *store_user_find(const char *username)
     return NULL;
 }
 
-store_status_t store_user_create(const char *username, const char *display_name,
-                                 const char *password)
+/* Thêm *u (đã malloc) vào cache; nhận sở hữu nếu thành công. */
+static bool cache_add(store_user_t *u)
 {
-    if (store_user_find(username))
-        return STORE_EXISTS;
-    if (strlen(username) > 20 || strlen(display_name) > 120)
-        return STORE_ERROR;
-
     if (g_users_n == g_users_cap) {
         size_t cap = g_users_cap ? g_users_cap * 2 : 16;
         store_user_t **p = realloc(g_users, cap * sizeof *p);
         if (!p)
-            return STORE_ERROR;
+            return false;
         g_users = p;
         g_users_cap = cap;
     }
-
-    store_user_t *u = calloc(1, sizeof *u);
-    if (!u)
-        return STORE_ERROR;
-    snprintf(u->username, sizeof u->username, "%s", username);
-    snprintf(u->display_name, sizeof u->display_name, "%s", display_name);
-    if (!random_hex(STORE_SALT_HEX_LEN / 2, u->salt) ||
-        !hash_password(u->salt, password, u->hash)) {
-        free(u);
-        return STORE_ERROR;
-    }
     g_users[g_users_n++] = u;
-    return STORE_OK;
+    return true;
+}
+
+bool store_init(const char *conninfo)
+{
+    g_db = PQconnectdb(conninfo);
+    if (PQstatus(g_db) != CONNECTION_OK) {
+        fprintf(stderr, "không kết nối được PostgreSQL: %s", PQerrorMessage(g_db));
+        PQfinish(g_db);
+        g_db = NULL;
+        return false;
+    }
+    return true;
+}
+
+void store_shutdown(void)
+{
+    for (size_t i = 0; i < g_users_n; i++)
+        free(g_users[i]);
+    free(g_users);
+    g_users = NULL;
+    g_users_n = g_users_cap = 0;
+    if (g_db) {
+        PQfinish(g_db);
+        g_db = NULL;
+    }
+}
+
+/* Chạy 1 lệnh có tham số; trả result (caller PQclear) hoặc NULL nếu lỗi nặng. */
+static PGresult *run(const char *sql, int n, const char *const *params,
+                     ExecStatusType expect)
+{
+    if (!g_db)
+        return NULL;
+    PGresult *res = PQexecParams(g_db, sql, n, NULL, params, NULL, NULL, 0);
+    if (PQresultStatus(res) != expect) {
+        /* 23505 (trùng khóa) do caller tự xử lý nên không coi là lỗi ở đây. */
+        const char *state = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (!state || strcmp(state, "23505") != 0)
+            fprintf(stderr, "lỗi SQL: %s", PQerrorMessage(g_db));
+        return res;                     /* trả luôn để caller đọc SQLSTATE */
+    }
+    return res;
+}
+
+store_user_t *store_user_find(const char *username)
+{
+    store_user_t *u = cache_find(username);
+    if (u)
+        return u;
+
+    const char *params[1] = { username };
+    PGresult *res = run("SELECT username, display_name, password_hash, salt "
+                        "FROM users WHERE username = $1",
+                        1, params, PGRES_TUPLES_OK);
+    if (!res)
+        return NULL;
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+        PQclear(res);
+        return NULL;
+    }
+
+    u = calloc(1, sizeof *u);
+    if (u) {
+        snprintf(u->username, sizeof u->username, "%s", PQgetvalue(res, 0, 0));
+        snprintf(u->display_name, sizeof u->display_name, "%s", PQgetvalue(res, 0, 1));
+        snprintf(u->hash, sizeof u->hash, "%s", PQgetvalue(res, 0, 2));
+        snprintf(u->salt, sizeof u->salt, "%s", PQgetvalue(res, 0, 3));
+        if (!cache_add(u)) {
+            free(u);
+            u = NULL;
+        }
+    }
+    PQclear(res);
+    return u;
+}
+
+store_status_t store_user_create(const char *username, const char *display_name,
+                                 const char *password)
+{
+    if (strlen(username) > 20 || strlen(display_name) > 120)
+        return STORE_ERROR;
+
+    char salt[STORE_SALT_HEX_LEN + 1], hash[STORE_HASH_HEX_LEN + 1];
+    if (!random_hex(STORE_SALT_HEX_LEN / 2, salt) ||
+        !hash_password(salt, password, hash))
+        return STORE_ERROR;
+
+    const char *params[4] = { username, display_name, hash, salt };
+    PGresult *res = run("INSERT INTO users (username, display_name, password_hash, salt) "
+                        "VALUES ($1, $2, $3, $4)",
+                        4, params, PGRES_COMMAND_OK);
+    if (!res)
+        return STORE_ERROR;
+    store_status_t st = STORE_OK;
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        const char *state = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        st = (state && strcmp(state, "23505") == 0) ? STORE_EXISTS : STORE_ERROR;
+    }
+    PQclear(res);
+    return st;          /* cache được nạp ở lần store_user_find đầu tiên */
 }
 
 bool store_user_check_password(const store_user_t *u, const char *password)
@@ -113,19 +195,20 @@ bool store_user_check_password(const store_user_t *u, const char *password)
 
 bool store_token_create(const store_user_t *u, char *token_out)
 {
-    if (g_tokens_n == g_tokens_cap) {
-        size_t cap = g_tokens_cap ? g_tokens_cap * 2 : 16;
-        token_entry_t *p = realloc(g_tokens, cap * sizeof *p);
-        if (!p)
-            return false;
-        g_tokens = p;
-        g_tokens_cap = cap;
-    }
-    token_entry_t *e = &g_tokens[g_tokens_n];
-    if (!random_hex(STORE_TOKEN_HEX_LEN / 2, e->token))
+    char token[STORE_TOKEN_HEX_LEN + 1];
+    if (!random_hex(STORE_TOKEN_HEX_LEN / 2, token))
         return false;
-    e->user = (store_user_t *)u;
-    g_tokens_n++;
-    memcpy(token_out, e->token, STORE_TOKEN_HEX_LEN + 1);
-    return true;
+
+    /* Hạn tạm 1 ngày; khi làm RESUME sẽ đặt now()+60s lúc mất kết nối. */
+    const char *params[2] = { token, u->username };
+    PGresult *res = run("INSERT INTO sessions (token, user_id, expires_at) "
+                        "SELECT $1, id, now() + interval '1 day' "
+                        "FROM users WHERE username = $2",
+                        2, params, PGRES_COMMAND_OK);
+    bool ok = res && PQresultStatus(res) == PGRES_COMMAND_OK &&
+              strcmp(PQcmdTuples(res), "1") == 0;
+    PQclear(res);
+    if (ok)
+        memcpy(token_out, token, sizeof token);
+    return ok;
 }
