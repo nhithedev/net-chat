@@ -1,5 +1,5 @@
 /*
- * net.c - tầng mạng: epoll (level-triggered), framing, hàng đợi gửi, timeout.
+ * net.c - tầng mạng: epoll (level-triggered), seq/ack, mã hóa, hàng đợi gửi, timeout.
  * Giao diện xem include/net.h. Một thread, một vòng epoll.
  *
  * Quy tắc sống còn của file này:
@@ -35,11 +35,8 @@
 #define NET_READS_PER_EV  8          /* chia công bằng giữa các kết nối */
 #define NET_TICK_MS       1000
 
-/* Đệm nhận tối đa chưa xử lý: 1 frame đầy đủ + dư một chút. Chỉ để tự vệ. */
-#define DEC_LIMIT         (NET_HEADER_LEN + NET_MAX_PAYLOAD + 65536u)
-
 /* Hai thông điệp cố định mà net tự gửi (net không biết JSON nhưng giao thức
- * yêu cầu gửi trước khi đóng). Giữ đồng bộ với protocol.md mục 2, 4.4. */
+ * yêu cầu gửi trước khi đóng). Giữ đồng bộ với protocol-v2.md mục 2, 4.4. */
 static const char KICK_TIMEOUT_JSON[] =
     "{\"type\":\"EVT_KICKED\",\"data\":{\"reason\":\"timeout\"}}";
 static const char KICK_SHUTDOWN_JSON[] =
@@ -49,112 +46,7 @@ static const char ERR_PROTOCOL_JSON[] =
     "\"error\":{\"code\":10,\"message\":\"Lỗi giao thức: sai khung dữ liệu\"}}";
 
 /* ================================================================
- * 1. Framing
- * ================================================================ */
-
-void frame_decoder_init(frame_decoder_t *d)
-{
-    memset(d, 0, sizeof *d);
-}
-
-void frame_decoder_free(frame_decoder_t *d)
-{
-    free(d->buf);
-    memset(d, 0, sizeof *d);
-}
-
-/* Trả lại byte đã bị ghi đè '\0' và coi frame trước đã được tiêu thụ. */
-static void dec_release(frame_decoder_t *d)
-{
-    if (d->has_restore) {
-        d->buf[d->restore_pos] = d->restore_byte;
-        d->off = d->restore_pos;
-        d->has_restore = 0;
-    }
-}
-
-static void dec_compact(frame_decoder_t *d)
-{
-    if (d->off == 0)
-        return;
-    if (d->off < d->len)
-        memmove(d->buf, d->buf + d->off, d->len - d->off);
-    d->len -= d->off;
-    d->off = 0;
-}
-
-int frame_decoder_feed(frame_decoder_t *d, const void *data, size_t n)
-{
-    dec_release(d);
-    dec_compact(d);
-    if (n == 0)
-        return 0;
-    if (d->len + n > DEC_LIMIT)
-        return -1;
-
-    size_t need = d->len + n + 1;          /* +1 chỗ cho '\0' sau payload */
-    if (need > d->cap) {
-        size_t cap = d->cap ? d->cap : 4096;
-        while (cap < need)
-            cap *= 2;
-        uint8_t *nb = realloc(d->buf, cap);
-        if (!nb)
-            return -1;
-        d->buf = nb;
-        d->cap = cap;
-    }
-    memcpy(d->buf + d->len, data, n);
-    d->len += n;
-    return 0;
-}
-
-frame_status_t frame_decoder_next(frame_decoder_t *d,
-                                  const char **payload, uint32_t *len)
-{
-    dec_release(d);
-
-    size_t avail = d->len - d->off;
-    if (avail < NET_HEADER_LEN) {
-        if (avail == 0)
-            d->off = d->len = 0;
-        return FRAME_NEED_MORE;              /* header bị cắt */
-    }
-
-    uint32_t be;
-    memcpy(&be, d->buf + d->off, sizeof be);   /* tránh lệch alignment */
-    uint32_t n = ntohl(be);
-    if (n == 0 || n > NET_MAX_PAYLOAD)
-        return FRAME_ERROR;
-    if (avail < NET_HEADER_LEN + (size_t)n)
-        return FRAME_NEED_MORE;
-
-    size_t start = d->off + NET_HEADER_LEN;
-    size_t end   = start + n;                  /* end < cap nhờ chỗ '+1' */
-    d->restore_pos  = end;
-    d->restore_byte = d->buf[end];
-    d->has_restore  = 1;
-    d->buf[end]     = '\0';
-
-    *payload = (const char *)d->buf + start;
-    *len = n;
-    return FRAME_OK;
-}
-
-ssize_t frame_encode(uint8_t *out, size_t out_cap,
-                     const char *payload, uint32_t len)
-{
-    if (len == 0 || len > NET_MAX_PAYLOAD)
-        return -1;
-    if (out_cap < NET_HEADER_LEN + (size_t)len)
-        return -1;
-    uint32_t be = htonl(len);
-    memcpy(out, &be, sizeof be);
-    memcpy(out + NET_HEADER_LEN, payload, len);
-    return (ssize_t)(NET_HEADER_LEN + len);
-}
-
-/* ================================================================
- * 2. Cấu trúc nội bộ
+ * 1. Cấu trúc nội bộ
  * ================================================================ */
 
 enum { TAG_CONN = 1, TAG_LISTEN = 2, TAG_WAKE = 3 };
@@ -167,6 +59,11 @@ struct net_conn {
     char             peer[64];
 
     frame_decoder_t  dec;
+
+    uint32_t         tx_seq;       /* seq của khung cuối đã gửi (0 = chưa gửi khung nào) */
+    uint32_t         rx_last;      /* seq của khung cuối đã nhận (0 = chưa nhận) */
+    bool             cipher;       /* mã hóa payload hai chiều (sau HELLO) */
+    bool             hello_done;   /* đã xử lý HELLO, không cho HELLO lần hai */
 
     uint8_t         *sendq;        /* header+payload đã mã hóa, nối đuôi nhau */
     size_t           sq_len;
@@ -221,7 +118,7 @@ static int64_t now_ms(void)
 }
 
 /* ================================================================
- * 3. Log
+ * 2. Log
  * ================================================================ */
 
 void net_log(const net_conn_t *c, const char *fmt, ...)
@@ -248,7 +145,7 @@ void net_log(const net_conn_t *c, const char *fmt, ...)
 }
 
 /* ================================================================
- * 4. Trạng thái kết nối: đánh dấu đóng, lên lịch flush, EPOLLOUT
+ * 3. Trạng thái kết nối: đánh dấu đóng, lên lịch flush, EPOLLOUT
  * ================================================================ */
 
 static void mark_dead(net_conn_t *c)
@@ -331,13 +228,24 @@ static void flush_pending(net_server_t *s)
 }
 
 /* ================================================================
- * 5. API trên kết nối
+ * 4. API trên kết nối
  * ================================================================ */
 
 uint64_t net_conn_id(const net_conn_t *c)         { return c->id; }
 const char *net_conn_peer(const net_conn_t *c)    { return c->peer; }
 void net_conn_set_data(net_conn_t *c, void *p)    { c->user = p; }
 void *net_conn_get_data(const net_conn_t *c)      { return c->user; }
+
+void net_conn_set_cipher(net_conn_t *c, bool on)
+{
+    c->cipher = on;
+    c->hello_done = true;
+}
+
+bool net_conn_hello_done(const net_conn_t *c)
+{
+    return c->hello_done;
+}
 
 int net_conn_rate_check(net_conn_t *c, unsigned max_per_sec)
 {
@@ -383,9 +291,12 @@ int net_send(net_conn_t *c, const char *payload, uint32_t len)
     }
 
     ssize_t w = frame_encode(c->sendq + c->sq_len, c->sq_cap - c->sq_len,
-                             payload, len);
+                             payload, len, c->tx_seq + 1, c->rx_last);
     if (w < 0)
         return -1;
+    c->tx_seq++;
+    if (c->cipher)                       /* chỉ payload, header luôn ở dạng rõ */
+        cipher_encode(c->sendq + c->sq_len + NET_HEADER_LEN, len);
     c->sq_len += (size_t)w;
     schedule_flush(c);
     return 0;
@@ -409,7 +320,7 @@ void net_close_now(net_conn_t *c)
 }
 
 /* ================================================================
- * 6. Nhận dữ liệu
+ * 5. Nhận dữ liệu
  * ================================================================ */
 
 static void protocol_error(net_conn_t *c)
@@ -452,15 +363,29 @@ static void handle_read(net_conn_t *c)
         }
 
         for (;;) {
-            const char *p;
-            uint32_t len;
-            frame_status_t st = frame_decoder_next(&c->dec, &p, &len);
+            char *p;
+            uint32_t len, seq, ack;
+            frame_status_t st = frame_decoder_next(&c->dec, &p, &len, &seq, &ack);
             if (st == FRAME_NEED_MORE)
                 break;
             if (st == FRAME_ERROR) {
                 protocol_error(c);
                 return;
             }
+
+            /* seq phải liên tục (protocol-v2 9.3): nhảy cóc thì ghi GAP nhưng vẫn
+             * xử lý; trùng hoặc cũ thì ghi DUP và bỏ khung. (ack: xem audit, chưa dùng) */
+            int32_t gap = (int32_t)(seq - (c->rx_last + 1));
+            if (gap < 0) {
+                net_log(c, "DUP seq=%u (đã nhận tới %u), bỏ khung", seq, c->rx_last);
+                continue;
+            }
+            if (gap > 0)
+                net_log(c, "GAP expected=%u got=%u missing=%d", c->rx_last + 1, seq, gap);
+            c->rx_last = seq;
+
+            if (c->cipher)
+                cipher_decode((uint8_t *)p, len);   /* tại chỗ; '\0' sau payload không đổi */
             s->cb.on_payload(c, p, len, s->cb.userdata);
             if (c->dead || c->closing)
                 break;
@@ -472,7 +397,7 @@ static void handle_read(net_conn_t *c)
 }
 
 /* ================================================================
- * 7. Accept, giải phóng, timeout
+ * 6. Accept, giải phóng, timeout
  * ================================================================ */
 
 static void accept_all(net_server_t *s)
@@ -583,7 +508,7 @@ static void check_timeouts(net_server_t *s)
 }
 
 /* ================================================================
- * 8. Vòng đời server
+ * 7. Vòng đời server
  * ================================================================ */
 
 net_server_t *net_server_create(uint16_t port, const net_callbacks_t *cb)

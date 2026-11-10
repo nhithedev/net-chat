@@ -401,7 +401,69 @@ int msg_push_event(net_conn_t *c, const char *evt_type, json_builder_t *data)
 }
 
 /* ================================================================
- * 6. Dispatch
+ * 6. HELLO: thương lượng mã hóa và nhịp PING (protocol-v2 mục 4.2)
+ * ================================================================ */
+
+#define HELLO_PING_MIN_MS      500
+#define HELLO_PING_MAX_MS    60000
+#define HELLO_PING_DEFAULT_MS 20000
+
+static void handle_hello(net_conn_t *c, const msg_request_t *req)
+{
+    if (net_conn_hello_done(c)) {
+        msg_reply_error(c, req, ERR_BAD_REQUEST, "HELLO chỉ được gửi một lần");
+        return;
+    }
+
+    /* enc: danh sách thuật toán client hỗ trợ; rỗng hoặc vắng = không mã hóa. */
+    bool caesar = false;
+    cJSON *enc = req->data ? cJSON_GetObjectItemCaseSensitive(req->data, "enc") : NULL;
+    if (enc) {
+        if (!cJSON_IsArray(enc)) {
+            msg_reply_error(c, req, ERR_BAD_REQUEST, "\"enc\" phải là mảng");
+            return;
+        }
+        cJSON *it;
+        cJSON_ArrayForEach(it, enc) {
+            if (!cJSON_IsString(it)) {
+                msg_reply_error(c, req, ERR_BAD_REQUEST, "\"enc\" chỉ gồm chuỗi");
+                return;
+            }
+            if (strcmp(it->valuestring, "caesar") == 0)
+                caesar = true;
+        }
+    }
+
+    int64_t ping_ms = HELLO_PING_DEFAULT_MS;
+    if (req->data && cJSON_GetObjectItemCaseSensitive(req->data, "ping_ms")) {
+        if (!msg_get_int(req, "ping_ms", &ping_ms)) {
+            msg_reply_error(c, req, ERR_BAD_REQUEST, "\"ping_ms\" phải là số nguyên");
+            return;
+        }
+        if (ping_ms < HELLO_PING_MIN_MS)
+            ping_ms = HELLO_PING_MIN_MS;
+        if (ping_ms > HELLO_PING_MAX_MS)
+            ping_ms = HELLO_PING_MAX_MS;
+    }
+
+    json_builder_t *d = jb_object();
+    if (!d) {
+        msg_reply_error(c, req, ERR_INTERNAL, NULL);
+        return;
+    }
+    jb_put_int(d, "proto", 1);
+    jb_put_str(d, "enc", caesar ? "caesar" : "none");
+    jb_put_int(d, "ping_ms", ping_ms);
+    jb_put_int(d, "conn_id", (int64_t)net_conn_id(c));
+    jb_put_int(d, "max_payload", NET_MAX_PAYLOAD);
+    msg_reply_ok(c, req, d);               /* HELLO_RES luôn ở dạng rõ */
+
+    net_conn_set_cipher(c, caesar);        /* từ khung kế tiếp mỗi chiều mới mã hóa */
+    net_log(c, "HELLO enc=%s ping_ms=%lld", caesar ? "caesar" : "none", (long long)ping_ms);
+}
+
+/* ================================================================
+ * 7. Dispatch
  * ================================================================ */
 
 static msg_handler_t g_handlers[MSG_TYPE_COUNT];
@@ -461,6 +523,8 @@ void msg_dispatch(net_conn_t *c, const char *payload, uint32_t len, void *userda
         g_handlers[r->type](c, r);
     } else if (r->type == MSG_PING) {
         send_and_free(c, msg_build_pong(r, NULL));
+    } else if (r->type == MSG_HELLO) {
+        handle_hello(c, r);
     } else {
         net_log(c, "chưa có handler cho %s", msg_type_name(r->type));
         msg_reply_error(c, r, ERR_INTERNAL, "Lệnh chưa được cài đặt");

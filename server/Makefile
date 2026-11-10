@@ -7,14 +7,15 @@ CC      ?= gcc
 CFLAGS  ?= -O2 -g
 WARN    := -std=gnu11 -Wall -Wextra -Wshadow
 PGINC   := $(shell pg_config --includedir 2>/dev/null || echo /usr/include/postgresql)
-INC     := -Iinclude -IcJSON -I$(PGINC)
+INC     := -Iinclude -I../common -IcJSON -I$(PGINC)
 BUILD   := build
 
-LIB_SRC := src/net.c src/msg.c
-LIB_OBJ := $(LIB_SRC:src/%.c=$(BUILD)/%.o) $(BUILD)/cJSON.o
-APP_SRC := store auth
+# net, msg, và mã dùng chung ở ../common (khung 12 byte, mã hóa)
+LIB_SRC := net msg frame cipher
+LIB_OBJ := $(LIB_SRC:%=$(BUILD)/%.o) $(BUILD)/cJSON.o
+APP_SRC := store auth chat
 APP_OBJ := $(APP_SRC:%=$(BUILD)/%.o)
-FAST_OBJ := $(BUILD)/fast/net.o $(BUILD)/fast/msg.o $(APP_SRC:%=$(BUILD)/fast/%.o) $(BUILD)/cJSON.o
+FAST_OBJ := $(LIB_SRC:%=$(BUILD)/fast/%.o) $(APP_SRC:%=$(BUILD)/fast/%.o) $(BUILD)/cJSON.o
 
 .PHONY: all test unit integration asan clean
 all: $(BUILD)/netchat-server $(BUILD)/netchat-client
@@ -22,8 +23,8 @@ all: $(BUILD)/netchat-server $(BUILD)/netchat-client
 $(BUILD)/netchat-server: $(BUILD)/server.o $(LIB_OBJ) $(APP_OBJ)
 	$(CC) $(CFLAGS) $^ -lm -lcrypto -lpq -o $@
 
-# client dòng lệnh để thử tay; chỉ cần phần framing của net.c
-$(BUILD)/netchat-client: $(BUILD)/client.o $(BUILD)/net.o
+# client dòng lệnh để thử tay; chỉ cần phần khung và mã hóa
+$(BUILD)/netchat-client: $(BUILD)/client.o $(BUILD)/frame.o $(BUILD)/cipher.o
 	$(CC) $(CFLAGS) $^ -o $@
 
 # bản có timeout ngắn (2s chưa đăng nhập, 4s im lặng) để test nhanh
@@ -36,6 +37,13 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 $(BUILD)/fast/%.o: src/%.c | $(BUILD)/fast
 	$(CC) $(CFLAGS) $(WARN) $(INC) -DNET_AUTH_TIMEOUT_S=2 -DNET_IDLE_TIMEOUT_S=4 \
 		-MMD -c $< -o $@
+
+# mã dùng chung với client/bot nằm ở ../common
+$(BUILD)/%.o: ../common/%.c | $(BUILD)
+	$(CC) $(CFLAGS) $(WARN) $(INC) -MMD -c $< -o $@
+
+$(BUILD)/fast/%.o: ../common/%.c | $(BUILD)/fast
+	$(CC) $(CFLAGS) $(WARN) $(INC) -MMD -c $< -o $@
 
 # thư viện bên thứ ba: không áp cảnh báo của mình
 $(BUILD)/cJSON.o: cJSON/cJSON.c | $(BUILD)

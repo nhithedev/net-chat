@@ -69,16 +69,18 @@
 
 .bubble {
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 20px 20px 20px 6px; /* góc nhọn phía người gửi */
   background: var(--bg-surface);
-  padding: 14px var(--space-4);
-  color: var(--text-muted);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 
 .bubble-row[data-mine] .bubble {
-  border-color: var(--chat-mine);
-  background: var(--chat-mine);
+  border-color: transparent;
+  border-radius: 20px 20px 6px 20px;
+  background: linear-gradient(135deg, var(--chat-mine), var(--accent-strong));
   color: var(--chat-mine-text);
 }
 

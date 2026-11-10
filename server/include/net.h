@@ -3,7 +3,8 @@
  *
  * Trách nhiệm:
  *   - listen/accept, epoll non-blocking, đọc/ghi từng phần
- *   - ghép/tách frame [uint32 length BE][payload]
+ *   - ghép/tách khung 12 byte [length][seq][ack][payload] (common/frame.h),
+ *     điền seq/ack, kiểm tra seq nhận, mã hóa/giải mã payload (common/cipher.h)
  *   - hàng đợi gửi mỗi kết nối, timeout, dọn kết nối
  *
  * KHÔNG làm: parse JSON, biết "type", biết user/DB. Những thứ đó thuộc msg.h
@@ -16,13 +17,17 @@
 #ifndef NET_H
 #define NET_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>   /* ssize_t */
 
-/* ---- Hằng số lấy từ protocol.md mục 7 ---- */
-#define NET_MAX_PAYLOAD     65536u          /* length hợp lệ: 1..65536 */
-#define NET_HEADER_LEN      4u
+#include "cipher.h"
+#include "frame.h"
+
+/* ---- Hằng số lấy từ protocol-v2.md mục 7 ---- */
+#define NET_MAX_PAYLOAD     FRAME_MAX_PAYLOAD   /* length hợp lệ: 1..65536 */
+#define NET_HEADER_LEN      FRAME_HEADER_LEN    /* 12 byte: length, seq, ack */
 #define NET_SENDQ_MAX       (1024u * 1024u) /* vượt thì đóng kết nối */
 #ifndef NET_AUTH_TIMEOUT_S
 #define NET_AUTH_TIMEOUT_S  30              /* chưa xác thực (tính từ lúc kết nối) */
@@ -35,54 +40,7 @@ typedef struct net_server net_server_t;
 typedef struct net_conn   net_conn_t;       /* opaque; chỉ dùng qua API dưới */
 
 /* ================================================================
- * 1. Framing thuần (không socket) - để unit test được riêng
- * ================================================================ */
-
-typedef enum {
-    FRAME_NEED_MORE = 0,   /* chưa đủ byte, chờ recv tiếp */
-    FRAME_OK        = 1,   /* đã lấy được 1 payload */
-    FRAME_ERROR     = -1   /* length == 0 hoặc > NET_MAX_PAYLOAD */
-} frame_status_t;
-
-/*
- * Bộ đệm nhận của một kết nối. Chịu được header bị cắt, nhiều frame/recv.
- * Bố cục: buf[0..off) đã trả cho caller, buf[off..len) chưa xử lý.
- * Các trường dưới đây là nội bộ, đừng đọc/ghi trực tiếp.
- */
-typedef struct {
-    uint8_t *buf;
-    size_t   len;          /* số byte đang có */
-    size_t   cap;
-    size_t   off;          /* đầu vùng chưa xử lý */
-    size_t   restore_pos;  /* vị trí byte bị ghi đè bằng '\0' ... */
-    uint8_t  restore_byte; /* ... và giá trị gốc của nó */
-    int      has_restore;
-} frame_decoder_t;
-
-void frame_decoder_init(frame_decoder_t *d);
-void frame_decoder_free(frame_decoder_t *d);
-
-/* Thêm byte vừa recv được. Trả 0 nếu ok, -1 nếu hết bộ nhớ. */
-int  frame_decoder_feed(frame_decoder_t *d, const void *data, size_t n);
-
-/*
- * Thử lấy 1 payload. Gọi lặp tới khi != FRAME_OK.
- * FRAME_OK: *payload trỏ vào bên trong buffer của decoder, *len là độ dài;
- *           con trỏ chỉ hợp lệ tới lần gọi feed/next kế tiếp (không free).
- *           Payload được NUL-terminate sẵn để parse JSON trực tiếp.
- */
-frame_status_t frame_decoder_next(frame_decoder_t *d,
-                                  const char **payload, uint32_t *len);
-
-/*
- * Ghi header + payload vào out (cần NET_HEADER_LEN + len byte).
- * Trả tổng số byte ghi, hoặc -1 nếu len ngoài 1..NET_MAX_PAYLOAD.
- */
-ssize_t frame_encode(uint8_t *out, size_t out_cap,
-                     const char *payload, uint32_t len);
-
-/* ================================================================
- * 2. Callback tầng trên cài vào
+ * 1. Callback tầng trên cài vào
  * ================================================================ */
 
 typedef struct {
@@ -116,7 +74,7 @@ typedef struct {
 } net_callbacks_t;
 
 /* ================================================================
- * 3. Vòng đời server
+ * 2. Vòng đời server
  * ================================================================ */
 
 /*
@@ -135,7 +93,7 @@ void net_server_stop(net_server_t *s);
 void net_server_destroy(net_server_t *s);
 
 /* ================================================================
- * 4. Thao tác trên kết nối
+ * 3. Thao tác trên kết nối
  * ================================================================ */
 
 /* Định danh số tăng dần, dùng cho log: "conn_id=17". */
@@ -145,6 +103,15 @@ const char *net_conn_peer(const net_conn_t *c);   /* "ip:port" */
 /* Con trỏ tuỳ ý tầng trên gắn vào kết nối (session). net không free. */
 void  net_conn_set_data(net_conn_t *c, void *p);
 void *net_conn_get_data(const net_conn_t *c);
+
+/*
+ * Mã hóa đường truyền (HELLO, protocol-v2 mục 4.2). Sau khi gọi, mọi khung gửi đi
+ * từ NÀY được mã hóa và mọi khung nhận về từ NÀY được giải mã; các khung đã xếp
+ * hàng đợi trước đó giữ nguyên. Gọi ngay sau khi đã net_send HELLO_RES (luôn ở
+ * dạng rõ). Gọi lần nào cũng đánh dấu HELLO đã xong.
+ */
+void net_conn_set_cipher(net_conn_t *c, bool on);
+bool net_conn_hello_done(const net_conn_t *c);
 
 /*
  * Đếm 1 message nhận được trong giây hiện tại (cửa sổ cố định 1 giây).
@@ -160,7 +127,7 @@ void net_log(const net_conn_t *c, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 
 /*
- * Đưa 1 payload vào hàng đợi gửi (net tự thêm header 4 byte rồi copy).
+ * Đưa 1 payload vào hàng đợi gửi (net tự thêm header 12 byte với seq/ack rồi copy).
  * Không gọi send() trực tiếp; vòng epoll gửi dần và bật/tắt EPOLLOUT.
  * Trả:
  *    0  ok

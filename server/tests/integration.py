@@ -66,10 +66,21 @@ class Server:
                 + "\n".join(problems[:10] or self.log.splitlines()[-10:]))
 
 
-def frame(obj):
-    data = obj if isinstance(obj, bytes) else json.dumps(
+HEADER = struct.Struct(">III")          # length, seq, ack (protocol-v2 mục 2)
+CAESAR_KEY = 3
+
+
+def caesar_encode(data):
+    return bytes((b + CAESAR_KEY) & 0xFF for b in data)
+
+
+def caesar_decode(data):
+    return bytes((b - CAESAR_KEY) & 0xFF for b in data)
+
+
+def to_bytes(obj):
+    return obj if isinstance(obj, bytes) else json.dumps(
         obj, ensure_ascii=False, separators=(",", ":")).encode()
-    return struct.pack(">I", len(data)) + data
 
 
 class Client:
@@ -80,21 +91,49 @@ class Client:
         self.sock.settimeout(5)
         self.sock.connect(("127.0.0.1", port))
         self.buf = b""
+        self.tx_seq = 0          # seq của khung cuối đã dựng
+        self.rx_seq = 0          # seq của khung cuối nhận được (điền vào ack khi gửi)
+        self.last_hdr = None     # (seq, ack) của khung vừa nhận
+        self.cipher = False      # bật sau HELLO nếu server chọn caesar
+
+    def frame(self, obj, *, seq=None, ack=None):
+        """Dựng 1 khung: seq tự tăng, ack = seq cuối đã nhận; mã hóa nếu đã bật."""
+        data = to_bytes(obj)
+        if self.cipher:
+            data = caesar_encode(data)
+        if seq is None:
+            self.tx_seq += 1
+            seq = self.tx_seq
+        return HEADER.pack(len(data), seq, self.rx_seq if ack is None else ack) + data
 
     def send(self, data):
         self.sock.sendall(data)
 
     def send_msg(self, obj):
-        self.send(frame(obj))
+        self.send(self.frame(obj))
+
+    def hello(self, enc=("caesar",), **extra):
+        """HELLO một mình (dạng rõ), chờ HELLO_RES rồi bật mã hóa nếu được chọn."""
+        data = {"proto": 1, "client": "test/0.1", "enc": list(enc)}
+        data.update(extra)
+        self.send_msg({"type": "HELLO", "id": "k-1", "data": data})
+        res = self.recv_msg()
+        if res and res.get("ok"):
+            self.cipher = res["data"]["enc"] == "caesar"
+        return res
 
     def _pop(self):
         """Lấy 1 message đã có đủ trong buffer, không thì None."""
-        if len(self.buf) < 4:
+        if len(self.buf) < HEADER.size:
             return None
-        (n,) = struct.unpack(">I", self.buf[:4])
-        if len(self.buf) < 4 + n:
+        n, seq, ack = HEADER.unpack(self.buf[:HEADER.size])
+        if len(self.buf) < HEADER.size + n:
             return None
-        payload, self.buf = self.buf[4:4 + n], self.buf[4 + n:]
+        payload = self.buf[HEADER.size:HEADER.size + n]
+        self.buf = self.buf[HEADER.size + n:]
+        self.rx_seq, self.last_hdr = seq, (seq, ack)
+        if self.cipher:
+            payload = caesar_decode(payload)
         return json.loads(payload.decode())
 
     def recv_msg(self):
@@ -163,16 +202,32 @@ class NetTest(unittest.TestCase):
         self.assertEqual(c.recv_msg(), {"type": "PONG", "id": "c-1"})
 
     def test_wire_bytes_match_protocol_example(self):
-        # Ví dụ mục 2: đúng các byte này trên dây. PING không có id vẫn hợp lệ
-        # (mục 5.7) nên phải nhận lại PONG không có id.
+        # Ví dụ mục 2: đúng các byte này trên dây (PING seq=5 ack=4). Đây là khung
+        # đầu tiên nên seq nhảy cóc: server ghi GAP nhưng vẫn xử lý và trả PONG.
         c = self.client()
-        c.send(bytes.fromhex("0000000F7B2274797065223A2250494E47227D"))
-        self.assertEqual(c.recv_msg(), {"type": "PONG"})
+        c.send(bytes.fromhex("0000001A0000000500000004")
+               + b'{"type":"PING","id":"k-1"}')
+        self.assertEqual(c.recv_msg(), {"type": "PONG", "id": "k-1"})
+        self.assertEqual(c.last_hdr, (1, 5))      # khung đầu server gửi: seq=1, ack=5
+
+    def test_server_fills_seq_and_ack(self):
+        c = self.client()
+        for i in range(1, 4):
+            c.send_msg({"type": "PING", "id": f"p{i}"})
+            c.recv_msg()
+            self.assertEqual(c.last_hdr, (i, i))  # seq tăng 1, ack = khung đã nhận
+
+    def test_duplicate_seq_is_dropped(self):
+        c = self.client()
+        c.send(c.frame({"type": "PING", "id": "a"}, seq=1)
+               + c.frame({"type": "PING", "id": "dup"}, seq=1)   # trùng: bỏ
+               + c.frame({"type": "PING", "id": "c"}, seq=2))
+        self.assertEqual([c.recv_msg()["id"], c.recv_msg()["id"]], ["a", "c"])
 
     # ---- framing ----------------------------------------------------------
     def test_header_split_byte_by_byte(self):
         c = self.client()
-        data = frame({"type": "PING", "id": "c-2"})
+        data = c.frame({"type": "PING", "id": "c-2"})
         for i in range(len(data)):
             c.send(data[i:i + 1])
             time.sleep(0.005)
@@ -180,16 +235,16 @@ class NetTest(unittest.TestCase):
 
     def test_many_frames_in_one_send(self):
         c = self.client()
-        c.send(b"".join(frame({"type": "PING", "id": f"c-{i}"})
+        c.send(b"".join(c.frame({"type": "PING", "id": f"c-{i}"})
                         for i in range(10)))
         got = [c.recv_msg()["id"] for _ in range(10)]
         self.assertEqual(got, [f"c-{i}" for i in range(10)])
 
     def test_frame_split_across_sends(self):
         c = self.client()
-        a, b = frame({"type": "PING", "id": "A"}), frame({"type": "PING", "id": "B"})
+        a, b = c.frame({"type": "PING", "id": "A"}), c.frame({"type": "PING", "id": "B"})
         data = a + b
-        cut = len(a) + 2                          # giữa header của frame 2
+        cut = len(a) + 5                          # mới nhận 5/12 byte header của khung 2
         c.send(data[:cut])
         self.assertEqual(c.recv_msg()["id"], "A")
         time.sleep(0.05)
@@ -203,19 +258,19 @@ class NetTest(unittest.TestCase):
         base["data"]["pad"] = "x" * (65536 - overhead)
         raw = json.dumps(base, separators=(",", ":")).encode()
         self.assertEqual(len(raw), 65536)
-        c.send(frame(raw))
+        c.send(c.frame(raw))
         self.assertEqual(c.recv_msg()["id"], "big")
 
     def test_zero_length_is_protocol_error_and_closes(self):
         c = self.client()
-        c.send(struct.pack(">I", 0))
+        c.send(HEADER.pack(0, 1, 0))
         r = c.recv_msg()
         self.assertEqual(r["error"]["code"], 10)
         self.assertTrue(c.expect_closed())
 
     def test_oversize_length_is_protocol_error_and_closes(self):
         c = self.client()
-        c.send(struct.pack(">I", 65537))
+        c.send(HEADER.pack(65537, 1, 0))
         r = c.recv_msg()
         self.assertEqual(r["error"]["code"], 10)
         self.assertTrue(c.expect_closed())
@@ -229,10 +284,86 @@ class NetTest(unittest.TestCase):
         d.send_msg({"type": "PING", "id": "ok"})
         self.assertEqual(d.recv_msg()["id"], "ok")
 
+    # ---- HELLO và mã hóa Caesar -------------------------------------------
+    def test_hello_negotiates_caesar(self):
+        c = self.client()
+        r = c.hello(ping_ms=1000)
+        self.assertEqual((r["type"], r["id"], r["ok"]), ("HELLO_RES", "k-1", True))
+        d = r["data"]
+        self.assertEqual((d["proto"], d["enc"], d["ping_ms"], d["max_payload"]),
+                         (1, "caesar", 1000, 65536))
+        self.assertIsInstance(d["conn_id"], int)
+        self.assertTrue(c.cipher)
+        # từ đây hai chiều đều mã hóa; tiếng Việt và emoji đi nguyên vẹn
+        c.send_msg({"type": "PING", "id": "xin chào Bình 😀"})
+        self.assertEqual(c.recv_msg()["id"], "xin chào Bình 😀")
+
+    def test_encrypted_bytes_on_the_wire(self):
+        # Byte thật trên dây: payload dịch +3 (header vẫn rõ). Gửi tay payload đã mã
+        # hóa, rồi đọc thẳng byte trả về mà không giải mã.
+        c = self.client()
+        c.hello()
+        plain = b'{"type":"PING","id":"k-2"}'
+        c.send(HEADER.pack(len(plain), c.tx_seq + 1, c.rx_seq) + caesar_encode(plain))
+        buf = b""
+        while len(buf) < HEADER.size or len(buf) < HEADER.size + HEADER.unpack(buf[:12])[0]:
+            buf += c.sock.recv(4096)
+        n = HEADER.unpack(buf[:12])[0]
+        wire = buf[12:12 + n]
+        self.assertNotIn(b"PONG", wire)                      # không đọc được trên dây
+        self.assertEqual(caesar_decode(wire), b'{"type":"PONG","id":"k-2"}')
+
+    def test_plain_frame_after_cipher_is_rejected_not_misread(self):
+        c = self.client()
+        c.hello()
+        c.send(HEADER.pack(26, c.tx_seq + 1, c.rx_seq) + b'{"type":"PING","id":"k-3"}')
+        r = c.recv_msg()                                  # server giải mã rác -> JSON hỏng
+        self.assertEqual(r["error"]["code"], 1)
+
+    def test_hello_without_enc_stays_plain(self):
+        c = self.client()
+        r = c.hello(enc=())
+        self.assertEqual(r["data"]["enc"], "none")
+        self.assertFalse(c.cipher)
+        c.send_msg({"type": "PING", "id": "plain"})
+        self.assertEqual(c.recv_msg()["id"], "plain")
+
+    def test_hello_unknown_algorithm_falls_back_to_none(self):
+        c = self.client()
+        self.assertEqual(c.hello(enc=("aes256",))["data"]["enc"], "none")
+
+    def test_hello_twice_rejected(self):
+        c = self.client()
+        c.hello()
+        c.send_msg({"type": "HELLO", "id": "k-9", "data": {"enc": ["caesar"]}})
+        r = c.recv_msg()
+        self.assertEqual((r["ok"], r["error"]["code"]), (False, 1))
+
+    def test_hello_ping_ms_is_clamped_and_validated(self):
+        self.assertEqual(self.client().hello(ping_ms=10)["data"]["ping_ms"], 500)
+        self.assertEqual(self.client().hello(ping_ms=999999)["data"]["ping_ms"], 60000)
+        self.assertEqual(self.client().hello()["data"]["ping_ms"], 20000)
+        r = self.client().hello(ping_ms="nhanh")
+        self.assertEqual(r["error"]["code"], 1)
+        c = self.client()                                 # "enc" phải là mảng chuỗi
+        c.send_msg({"type": "HELLO", "id": "k-1", "data": {"enc": "caesar"}})
+        self.assertEqual(c.recv_msg()["error"]["code"], 1)
+        c = self.client()
+        c.send_msg({"type": "HELLO", "id": "k-1", "data": {"enc": [1, 2]}})
+        self.assertEqual(c.recv_msg()["error"]["code"], 1)
+
+    def test_encryption_is_per_connection(self):
+        a, b = self.client(), self.client()
+        a.hello()                                         # a mã hóa, b không
+        b.send_msg({"type": "PING", "id": "b"})
+        a.send_msg({"type": "PING", "id": "a"})
+        self.assertEqual(b.recv_msg()["id"], "b")
+        self.assertEqual(a.recv_msg()["id"], "a")
+
     # ---- message ----------------------------------------------------------
     def test_invalid_json_keeps_connection(self):
         c = self.client()
-        c.send(frame(b"{not json"))
+        c.send(c.frame(b"{not json"))
         self.assertEqual(c.recv_msg()["error"]["code"], 1)
         c.send_msg({"type": "PING", "id": "after"})
         self.assertEqual(c.recv_msg()["id"], "after")
@@ -282,7 +413,7 @@ class NetTest(unittest.TestCase):
 
     def test_rate_limit(self):
         c = self.client()
-        c.send(b"".join(frame({"type": "PING", "id": str(i)})
+        c.send(b"".join(c.frame({"type": "PING", "id": str(i)})
                         for i in range(80)))
         codes = []
         for _ in range(80):
@@ -294,7 +425,7 @@ class NetTest(unittest.TestCase):
     # ---- kết nối ----------------------------------------------------------
     def test_abrupt_close_mid_frame_does_not_break_server(self):
         c = self.client()
-        c.send(struct.pack(">I", 100) + b"{\"typ")  # frame dở rồi bỏ
+        c.send(HEADER.pack(100, 1, 0) + b"{\"typ")  # khung dở rồi bỏ
         c.close()
         time.sleep(0.1)
         d = self.client()
@@ -323,11 +454,10 @@ class NetTest(unittest.TestCase):
         # Để tránh bị kernel nuốt hết, client thu nhỏ bộ đệm nhận.
         c = self.client(rcvbuf=4096)
         c.sock.settimeout(0.5)
-        payload = frame({"type": "PING", "id": "s" * 2000})
         closed = False
         try:
             for _ in range(60000):
-                c.sock.sendall(payload)
+                c.sock.sendall(c.frame({"type": "PING", "id": "s" * 2000}))  # seq khác nhau
         except (socket.timeout, BrokenPipeError, ConnectionResetError):
             closed = True
         # dù sendall có kẹt hay không, kết nối phải bị server cắt
@@ -398,7 +528,8 @@ class AuthTest(unittest.TestCase):
         evt = c.recv_msg()
         self.assertEqual(evt, {"type": "EVT_OFFLINE_MSGS", "data": {"messages": []}})
         # đã xác thực: lệnh cần đăng nhập không còn ERR_NOT_AUTHENTICATED
-        c.send_msg({"type": "FRIEND_LIST", "id": "c-3"})
+        # (GROUP_LIST chưa có handler nên trả ERR_INTERNAL; chỉ cần khác lỗi 2)
+        c.send_msg({"type": "GROUP_LIST", "id": "c-3"})
         self.assertNotEqual(c.recv_msg()["error"]["code"], 2)
 
     def test_register_duplicate(self):
@@ -444,7 +575,7 @@ class AuthTest(unittest.TestCase):
         a.expect_closed()
         # kết nối mới vẫn dùng được sau khi kết nối cũ đóng
         b.recv_msg()
-        b.send_msg({"type": "FRIEND_LIST", "id": "c-9"})
+        b.send_msg({"type": "GROUP_LIST", "id": "c-9"})
         self.assertNotEqual(b.recv_msg()["error"]["code"], 2)
 
     def test_second_login_on_same_connection_rejected(self):

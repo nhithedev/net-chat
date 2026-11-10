@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Báo cáo tiến độ – Net-Chat</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#5b6570;--line:#dde1e6;--acc:#2455d6;--ok:#17803d;--warn:#b45309;--code:#eef1f5}
+  @media (prefers-color-scheme:dark){:root{--bg:#12151a;--card:#1a1f26;--ink:#e8ebef;--mute:#9aa4b0;--line:#2b323b;--acc:#7da2ff;--ok:#4ade80;--warn:#fbbf24;--code:#232a33}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:960px;margin:0 auto;padding:32px 16px 64px}
+  header{margin-bottom:24px}
+  h1{font-size:2rem;margin:0 0 4px}
+  .sub{color:var(--mute)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:16px 0}
+  h2{font-size:1.25rem;margin:0 0 12px;color:var(--acc)}
+  h3{font-size:1rem;margin:16px 0 6px}
+  code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em}
+  code{background:var(--code);padding:1px 5px;border-radius:4px}
+  pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:8px 0}
+  table{border-collapse:collapse;width:100%;font-size:.95rem;display:block;overflow-x:auto}
+  th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{color:var(--mute);font-weight:600}
+  .tag{display:inline-block;font-size:.78rem;font-weight:600;padding:1px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+  .ok{color:var(--ok)} .no{color:var(--warn)}
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;margin:8px 0}
+  .box{flex:1 1 130px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.88rem;background:var(--bg)}
+  .box b{display:block;color:var(--acc)}
+  .arrow{align-self:center;color:var(--mute)}
+  .frame{display:flex;text-align:center;font-size:.85rem;margin:8px 0}
+  .frame div{padding:10px 4px;border:1px solid var(--line)}
+  .frame .h{background:var(--code);flex:1}
+  .frame .p{flex:4;border-color:var(--acc)}
+  ul{padding-left:20px;margin:6px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .stat{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .stat b{font-size:1.5rem;display:block}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Net-Chat – Báo cáo tiến độ</h1>
+  <div class="sub">Bài tập lớn Lập trình mạng · Ứng dụng chat dùng socket TCP thuần, giao thức tự thiết kế (protocol v2)</div>
+</header>
+
+<section>
+  <h2>1. Hướng đi</h2>
+  <p>Nhóm chuyển từ kiến trúc <i>Gateway Node.js + WebSocket</i> sang <b>Electron + lõi C + TCP thô</b>, không dùng HTTP/WebSocket. Lý do: ở kiến trúc cũ, đăng nhập, gửi tin… đều là việc của tầng ứng dụng (web), còn TCP chỉ là đường truyền. Ở kiến trúc mới, chính chương trình của nhóm tự đọc/ghi socket, tự tách khung (framing), tự đánh số gói, tự xử lý lỗi.</p>
+  <ul>
+    <li><b>Xử lý luồng TCP (stream)</b>: tự ghép khung từ dòng byte, chịu được gói bị cắt/dính.</li>
+    <li><b>Socket I/O</b>: server <code>epoll</code> đơn luồng; client dùng <code>poll</code>.</li>
+    <li>Đặc tả đầy đủ trong <code>protocol-v2.md</code>.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>2. Kiến trúc</h2>
+  <div class="flow">
+    <div class="box"><b>React (renderer)</b>Giao diện, không có mạng</div><div class="arrow">→</div>
+    <div class="box"><b>Preload</b><code>window.netchat</code></div><div class="arrow">→</div>
+    <div class="box"><b>Electron main</b>IPC, map <code>id → Promise</code></div><div class="arrow">→ pipe</div>
+    <div class="box"><b>Lõi C</b><code>netchat-core</code>: khung, seq/ack, mã hóa, HELLO</div><div class="arrow">→ TCP :9000</div>
+    <div class="box"><b>Server C</b>epoll · net / msg / nghiệp vụ</div><div class="arrow">→</div>
+    <div class="box"><b>PostgreSQL</b>users, friends, messages, sessions</div>
+  </div>
+  <p class="sub">Giao diện không chạm được socket: toàn bộ giao tiếp mạng nằm trong lõi C và server.</p>
+</section>
+
+<section>
+  <h2>3. Giao thức v2 (đã cài đặt)</h2>
+  <h3>Khung TCP – 12 byte header</h3>
+  <div class="frame">
+    <div class="h">length<br>4B</div><div class="h">seq<br>4B</div><div class="h">ack<br>4B</div><div class="p">payload (JSON, 1…65536 byte)</div>
+  </div>
+  <ul>
+    <li>Big-endian; <code>seq</code> bắt đầu từ 1, tăng dần; <code>ack</code> = seq cuối đã nhận.</li>
+    <li>Server phát hiện <b>gói trùng</b> (bỏ) và <b>khuyết seq</b> (ghi log).</li>
+    <li><b>HELLO</b> bắt tay ở dạng rõ → từ đó payload mã hóa <b>Caesar (+3 mỗi byte)</b>; header giữ nguyên để dễ ghép khung.</li>
+    <li>Thông điệp JSON: request <code>{type,id,data}</code> → response <code>TYPE_RES</code> (<code>ok</code>/<code>error</code>) → sự kiện đẩy <code>EVT_*</code>.</li>
+    <li>Mã lỗi: 1 sai yêu cầu · 2 chưa đăng nhập · 4 chưa là bạn · 6 đã tồn tại · 1001/1002/1003 lỗi tài khoản.</li>
+    <li>Chống spam: giới hạn 20 message/giây mỗi kết nối.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>4. Đã làm được</h2>
+  <table>
+    <tr><th>Phần</th><th>Nội dung</th><th>Trạng thái</th></tr>
+    <tr><td>Thư viện khung / mã hóa dùng chung</td><td><code>common/frame.c</code>, <code>cipher.c</code> – dùng chung cho server và lõi client</td><td><span class="tag ok">Xong</span></td></tr>
+    <tr><td>Server – tầng mạng</td><td>epoll, ghép khung, seq/ack, HELLO, Caesar, giới hạn tốc độ</td><td><span class="tag ok">Xong</span></td></tr>
+    <tr><td>Tài khoản</td><td>Đăng ký, đăng nhập (SHA-256 + salt), token phiên, đá phiên cũ khi đăng nhập nơi khác</td><td><span class="tag ok">Xong</span></td></tr>
+    <tr><td>Bạn bè</td><td>Mời / chấp nhận / từ chối / xóa / danh sách, kèm sự kiện đẩy tới người kia</td><td><span class="tag ok">Xong (server)</span></td></tr>
+    <tr><td>Chat 1-1</td><td>Mở/đóng chat, gửi tin, lịch sử, tin cho người offline được lưu lại, báo khi đối phương rớt kết nối</td><td><span class="tag ok">Xong (server)</span></td></tr>
+    <tr><td>Online</td><td>Danh sách online, <code>EVT_USER_ONLINE/OFFLINE</code></td><td><span class="tag ok">Xong (server)</span></td></tr>
+    <tr><td>Lõi client (C)</td><td>Kết nối, HELLO, seq/ack, Caesar, cầu nối với Electron qua pipe</td><td><span class="tag ok">Xong</span></td></tr>
+    <tr><td>Electron</td><td>main + preload + <code>core-link</code> (id → Promise, timeout), cách ly <code>contextIsolation</code> + <code>sandbox</code></td><td><span class="tag ok">Xong</span></td></tr>
+    <tr><td>Giao diện React</td><td>Màn <b>Đăng ký / Đăng nhập nối server thật</b>, hiển thị lỗi tiếng Việt theo mã lỗi</td><td><span class="tag ok">Xong</span></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>5. Luồng đăng nhập (ví dụ xuyên suốt)</h2>
+  <table>
+    <tr><th>#</th><th>Nơi</th><th>Việc xảy ra</th></tr>
+    <tr><td>1</td><td>React <code>AuthPage.tsx</code></td><td>Bấm “Đăng nhập” → <code>call('LOGIN', …)</code></td></tr>
+    <tr><td>2</td><td><code>netchat.ts</code> → preload → main</td><td>Đảm bảo đã kết nối, rồi IPC <code>netchat:request</code></td></tr>
+    <tr><td>3</td><td><code>core-link.cjs</code></td><td>Gán <code>id=c-N</code>, lưu Promise chờ, ghi khung vào pipe</td></tr>
+    <tr><td>4</td><td>Lõi C <code>core.c</code></td><td>Đóng khung 12B (seq/ack), mã hóa Caesar, <code>send()</code> qua TCP</td></tr>
+    <tr><td>5</td><td>Server <code>net.c</code></td><td><code>epoll</code> → ghép khung → kiểm tra seq → giải mã</td></tr>
+    <tr><td>6</td><td><code>msg.c</code> → <code>auth.c</code></td><td>Parse JSON, rate-limit, gọi <code>handle_login</code>: tìm user, so mật khẩu băm, tạo token</td></tr>
+    <tr><td>7</td><td>Server → client</td><td><code>LOGIN_RES</code> (cùng <code>id</code>) + các sự kiện, mã hóa và gửi lại</td></tr>
+    <tr><td>8</td><td>Lõi C → main</td><td>Giải mã, đẩy lên pipe; <code>core-link</code> khớp <code>id</code> và resolve Promise</td></tr>
+    <tr><td>9</td><td>React</td><td><code>onAuthenticated</code> → chuyển sang màn chat</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>6. Kiểm thử</h2>
+  <div class="grid">
+    <div class="stat"><b>13</b>test đơn vị cho khung (gồm ví dụ PING trong đặc tả, dạng rõ và đã mã hóa)</div>
+    <div class="stat"><b>41</b>test tích hợp (Python, socket thô tới server thật)</div>
+    <div class="stat"><b>ASAN</b>đã chạy server dưới AddressSanitizer</div>
+  </div>
+  <p>Test tích hợp bao gồm: khung bị cắt nhỏ/dính nhiều gói, seq trùng/khuyết, HELLO sai, mã hóa trên dây, đăng ký/đăng nhập, kết bạn, chat, offline.</p>
+</section>
+
+<section>
+  <h2>7. Cách demo</h2>
+  <h3>Server + kịch bản 2 người dùng (hiện cả seq/ack và payload)</h3>
+<pre>cd server
+export NETCHAT_DB="host=127.0.0.1 port=5433 dbname=chat user=chat password=chat"
+make && ./build/server              # cổng 9000
+python3 -I tests/demo_chat.py       # 8 bước: đăng ký → kết bạn → chat → rớt mạng → offline</pre>
+  <h3>Ứng dụng đầy đủ (Electron)</h3>
+<pre>cd client/native && make            # build lõi C
+cd .. && npm run build && npx electron .</pre>
+  <p class="sub">Có thể mở Wireshark trên <code>lo</code>, cổng 9000: thấy header 12 byte rõ ràng, payload đã bị dịch +3.</p>
+</section>
+
+<section>
+  <h2>8. Chưa làm / kế hoạch</h2>
+  <table>
+    <tr><th>Hạng mục</th><th>Ghi chú</th></tr>
+    <tr><td>Giao diện bạn bè / chat nối server thật</td><td>Server đã có đủ; UI hiện còn dữ liệu mẫu, cần nối sự kiện <code>EVT_*</code> vào React</td></tr>
+    <tr><td>Truyền file ở tầng thấp</td><td>Chưa làm (điểm cốt lõi của môn, ưu tiên tiếp theo)</td></tr>
+    <tr><td>Nhóm chat, đẩy tin offline khi đăng nhập</td><td>Chưa làm</td></tr>
+    <tr><td>RESUME + tự kết nối lại trong lõi C, PING từ server</td><td>Chưa làm</td></tr>
+    <tr><td>Audit log, message dev (ECHO/STATS/FAULT), bot / tạo tải</td><td>Chưa làm</td></tr>
+    <tr><td>Bản build cho Windows</td><td>Hiện mới build lõi trên Linux/WSL</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>9. Đối chiếu barem</h2>
+  <ul>
+    <li><b>Xử lý stream (1đ)</b>: <span class="ok">có</span> – khung 12B, bộ ghép khung, test cắt/dính gói.</li>
+    <li><b>Socket I/O (2đ)</b>: <span class="ok">có</span> – epoll phía server, poll phía lõi client, toàn bộ bằng C thuần.</li>
+    <li><b>Chức năng + giao diện (3đ)</b>: <span class="no">đang làm</span> – đăng ký/đăng nhập có giao diện; bạn bè/chat đã chạy ở server, chưa lên giao diện; file chưa có.</li>
+  </ul>
+</section>
+</main>
+</body>
+</html>

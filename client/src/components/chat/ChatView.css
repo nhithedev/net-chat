@@ -11,6 +11,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
   padding: var(--space-3) 18px;
+  box-shadow: var(--shadow-sm);
 }
 
 .chat-header h2 {
@@ -49,7 +50,15 @@
   background: var(--bg-surface);
   padding: 5px 6px 5px var(--space-4);
   box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
   --gap: 6px;
+}
+
+.message-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .message-input input {

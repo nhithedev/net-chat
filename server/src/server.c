@@ -10,6 +10,7 @@
 #include <stdlib.h>
 
 #include "auth.h"
+#include "chat.h"
 #include "msg.h"
 #include "net.h"
 #include "store.h"
@@ -47,6 +48,7 @@ int main(int argc, char **argv)
         .is_authed  = auth_net_is_authed,
     };
     auth_init();
+    chat_init();
 
     g_server = net_server_create(port, &cb);
     if (!g_server) {

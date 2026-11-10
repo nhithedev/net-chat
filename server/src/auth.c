@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <string.h>
 
+#include "chat.h"
 #include "msg.h"
 #include "store.h"
 
@@ -21,7 +22,7 @@ static int is_authed(net_conn_t *c)
 }
 
 /* username: 3..20 ký tự [a-z0-9_] sau khi đổi sang chữ thường. */
-static bool normalize_username(const char *in, char *out)
+bool auth_normalize_username(const char *in, char *out)
 {
     size_t n = strlen(in);
     if (n < 3 || n > 20)
@@ -48,7 +49,7 @@ static void handle_register(net_conn_t *c, const msg_request_t *req)
     if (!msg_get_str(req, "username", &username) ||
         !msg_get_str(req, "password", &password) ||
         !msg_get_str(req, "display_name", &display_name) ||
-        !normalize_username(username, name) ||
+        !auth_normalize_username(username, name) ||
         !msg_str_len_between(password, 6, 64) ||
         !msg_str_len_between(display_name, 1, 30)) {
         msg_reply_error(c, req, ERR_BAD_REQUEST, NULL);
@@ -82,7 +83,7 @@ static void handle_login(net_conn_t *c, const msg_request_t *req)
     char name[21];
     if (!msg_get_str(req, "username", &username) ||
         !msg_get_str(req, "password", &password) ||
-        !normalize_username(username, name)) {
+        !auth_normalize_username(username, name)) {
         msg_reply_error(c, req, ERR_BAD_REQUEST, NULL);
         return;
     }
@@ -134,6 +135,10 @@ static void handle_login(net_conn_t *c, const msg_request_t *req)
         jb_put_arr(m, "messages", jb_array());
         msg_push_event(c, "EVT_OFFLINE_MSGS", m);
     }
+
+    /* Đăng nhập đá kết nối cũ thì user vẫn online, không báo bạn bè lần nữa. */
+    if (!old)
+        chat_on_login(u);
 }
 
 int auth_net_is_authed(net_conn_t *c, void *ud)
@@ -149,6 +154,7 @@ void auth_net_on_close(net_conn_t *c, void *ud)
     if (u && u->conn == c) {
         u->conn = NULL;
         net_log(c, "ngắt kết nối user=%s", u->username);
+        chat_on_disconnect(u);
     }
 }
 

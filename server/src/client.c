@@ -22,7 +22,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "net.h"            /* chỉ dùng phần framing: frame_decoder_*, frame_encode */
+#include "frame.h"          /* khung 12 byte: frame_decoder_*, frame_encode */
 
 static int connect_to(const char *host, const char *port)
 {
@@ -66,14 +66,18 @@ static int send_all(int fd, const uint8_t *p, size_t n)
     return 0;
 }
 
+/* seq/ack của client thử tay: không mã hóa (không gửi HELLO), seq tăng dần. */
+static uint32_t g_tx_seq, g_rx_seq;
+
 static int send_payload(int fd, const char *payload, size_t len)
 {
-    static uint8_t out[NET_HEADER_LEN + NET_MAX_PAYLOAD];
-    ssize_t n = frame_encode(out, sizeof out, payload, (uint32_t)len);
+    static uint8_t out[FRAME_HEADER_LEN + FRAME_MAX_PAYLOAD];
+    ssize_t n = frame_encode(out, sizeof out, payload, (uint32_t)len, g_tx_seq + 1, g_rx_seq);
     if (n < 0) {
-        fprintf(stderr, "payload phải dài 1..%u byte\n", NET_MAX_PAYLOAD);
+        fprintf(stderr, "payload phải dài 1..%u byte\n", FRAME_MAX_PAYLOAD);
         return 0;                        /* lỗi nhập liệu, không phải lỗi mạng */
     }
+    g_tx_seq++;
     return send_all(fd, out, (size_t)n);
 }
 
@@ -134,9 +138,9 @@ int main(int argc, char **argv)
                 break;
             }
             for (;;) {
-                const char *p;
-                uint32_t len;
-                frame_status_t st = frame_decoder_next(&dec, &p, &len);
+                char *p;
+                uint32_t len, seq, ack;
+                frame_status_t st = frame_decoder_next(&dec, &p, &len, &seq, &ack);
                 if (st == FRAME_NEED_MORE)
                     break;
                 if (st == FRAME_ERROR) {
@@ -144,6 +148,7 @@ int main(int argc, char **argv)
                     rc = 1;
                     goto out;
                 }
+                g_rx_seq = seq;
                 printf("<< %s\n", p);
                 fflush(stdout);
             }

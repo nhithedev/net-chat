@@ -6,6 +6,7 @@ import ActivityLogPanel from './components/layout/ActivityLogPanel'
 import { ActivityLogContext } from './hooks/ActivityLogContext'
 import useActivityLogStore from './hooks/useActivityLogStore'
 import { eventForKick } from './lib/activity'
+import './lib/netchat'
 import { addUnique, removeBy } from './lib/list'
 import AuthPage from './pages/AuthPage'
 import ChatPage from './pages/ChatPage'
@@ -28,6 +29,9 @@ export default function App() {
 
   // Quay về màn đăng nhập = đóng kết nối cũ, lần sau là kết nối mới.
   function logout() {
+    // Server chưa có LOGOUT; đóng kết nối TCP để người dùng được đánh dấu offline
+    // và màn đăng nhập mở kết nối mới (AuthPage tự kết nối lại khi cần).
+    void window.netchat?.disconnect()
     setCurrentUser(null)
     setScreen('chat')
     setFatalState(null)

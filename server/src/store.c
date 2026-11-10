@@ -134,7 +134,7 @@ store_user_t *store_user_find(const char *username)
         return u;
 
     const char *params[1] = { username };
-    PGresult *res = run("SELECT username, display_name, password_hash, salt "
+    PGresult *res = run("SELECT username, display_name, password_hash, salt, id "
                         "FROM users WHERE username = $1",
                         1, params, PGRES_TUPLES_OK);
     if (!res)
@@ -150,6 +150,7 @@ store_user_t *store_user_find(const char *username)
         snprintf(u->display_name, sizeof u->display_name, "%s", PQgetvalue(res, 0, 1));
         snprintf(u->hash, sizeof u->hash, "%s", PQgetvalue(res, 0, 2));
         snprintf(u->salt, sizeof u->salt, "%s", PQgetvalue(res, 0, 3));
+        u->id = strtoll(PQgetvalue(res, 0, 4), NULL, 10);
         if (!cache_add(u)) {
             free(u);
             u = NULL;
@@ -191,6 +192,233 @@ bool store_user_check_password(const store_user_t *u, const char *password)
     if (!hash_password(u->salt, password, h))
         return false;
     return CRYPTO_memcmp(h, u->hash, STORE_HASH_HEX_LEN) == 0;
+}
+
+/* ================================================================
+ * Bạn bè
+ * ================================================================ */
+
+/* Lệnh ghi: trả OK nếu đúng 1 dòng bị ảnh hưởng, NOT_FOUND nếu 0 dòng. */
+static store_status_t run_one_row(const char *sql, int n, const char *const *params)
+{
+    PGresult *res = run(sql, n, params, PGRES_COMMAND_OK);
+    if (!res)
+        return STORE_ERROR;
+    store_status_t st;
+    if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        st = STORE_ERROR;
+    else
+        st = strcmp(PQcmdTuples(res), "0") == 0 ? STORE_NOT_FOUND : STORE_OK;
+    PQclear(res);
+    return st;
+}
+
+static bool user_exists(const char *username)
+{
+    const char *p[1] = { username };
+    PGresult *res = run("SELECT 1 FROM users WHERE username = $1",
+                        1, p, PGRES_TUPLES_OK);
+    bool ok = res && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
+    PQclear(res);
+    return ok;
+}
+
+bool store_are_friends(const char *a, const char *b)
+{
+    const char *p[2] = { a, b };
+    PGresult *res = run(
+        "SELECT 1 FROM users a, users b, friendships f "
+        "WHERE a.username = $1 AND b.username = $2 "
+        "AND f.user_low = LEAST(a.id, b.id) AND f.user_high = GREATEST(a.id, b.id)",
+        2, p, PGRES_TUPLES_OK);
+    bool ok = res && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1;
+    PQclear(res);
+    return ok;
+}
+
+store_status_t store_friend_request(const char *from, const char *to)
+{
+    if (!user_exists(to))
+        return STORE_NOT_FOUND;
+    if (store_are_friends(from, to))
+        return STORE_EXISTS;
+
+    const char *p[2] = { from, to };
+    PGresult *res = run(
+        "INSERT INTO friend_requests (requester_id, addressee_id) "
+        "SELECT a.id, b.id FROM users a, users b "
+        "WHERE a.username = $1 AND b.username = $2",
+        2, p, PGRES_COMMAND_OK);
+    if (!res)
+        return STORE_ERROR;
+    store_status_t st = STORE_OK;
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        /* chỉ mục duy nhất theo cặp: đã có lời mời chờ (kể cả chiều ngược lại) */
+        const char *state = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        st = (state && strcmp(state, "23505") == 0) ? STORE_EXISTS : STORE_ERROR;
+    }
+    PQclear(res);
+    return st;
+}
+
+store_status_t store_friend_accept(const char *me, const char *from)
+{
+    const char *p[2] = { me, from };
+    /* Một câu lệnh: đổi trạng thái lời mời rồi tạo quan hệ bạn bè (nguyên tử). */
+    return run_one_row(
+        "WITH r AS ("
+        "  UPDATE friend_requests SET status = 'accepted', responded_at = now() "
+        "  WHERE status = 'pending' "
+        "    AND addressee_id = (SELECT id FROM users WHERE username = $1) "
+        "    AND requester_id = (SELECT id FROM users WHERE username = $2) "
+        "  RETURNING requester_id, addressee_id) "
+        "INSERT INTO friendships (user_low, user_high) "
+        "SELECT LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id) "
+        "FROM r",
+        2, p);
+}
+
+store_status_t store_friend_reject(const char *me, const char *from)
+{
+    const char *p[2] = { me, from };
+    return run_one_row(
+        "UPDATE friend_requests SET status = 'rejected', responded_at = now() "
+        "WHERE status = 'pending' "
+        "  AND addressee_id = (SELECT id FROM users WHERE username = $1) "
+        "  AND requester_id = (SELECT id FROM users WHERE username = $2)",
+        2, p);
+}
+
+store_status_t store_friend_remove(const char *me, const char *other)
+{
+    const char *p[2] = { me, other };
+    return run_one_row(
+        "DELETE FROM friendships f USING users a, users b "
+        "WHERE a.username = $1 AND b.username = $2 "
+        "AND f.user_low = LEAST(a.id, b.id) AND f.user_high = GREATEST(a.id, b.id)",
+        2, p);
+}
+
+static void each_user(const char *sql, const char *me, store_user_cb cb, void *ud)
+{
+    const char *p[1] = { me };
+    PGresult *res = run(sql, 1, p, PGRES_TUPLES_OK);
+    if (!res)
+        return;
+    if (PQresultStatus(res) == PGRES_TUPLES_OK)
+        for (int i = 0; i < PQntuples(res); i++)
+            cb(PQgetvalue(res, i, 0), PQgetvalue(res, i, 1), ud);
+    PQclear(res);
+}
+
+void store_friends_each(const char *me, store_user_cb cb, void *ud)
+{
+    each_user("SELECT o.username, o.display_name "
+              "FROM users m JOIN friendships f ON m.id IN (f.user_low, f.user_high) "
+              "JOIN users o ON o.id = f.user_low + f.user_high - m.id "
+              "WHERE m.username = $1 ORDER BY o.username",
+              me, cb, ud);
+}
+
+void store_pending_in_each(const char *me, store_user_cb cb, void *ud)
+{
+    each_user("SELECT u.username, u.display_name "
+              "FROM friend_requests r JOIN users u ON u.id = r.requester_id "
+              "JOIN users m ON m.id = r.addressee_id "
+              "WHERE m.username = $1 AND r.status = 'pending' ORDER BY u.username",
+              me, cb, ud);
+}
+
+void store_pending_out_each(const char *me, store_user_cb cb, void *ud)
+{
+    each_user("SELECT u.username, u.display_name "
+              "FROM friend_requests r JOIN users u ON u.id = r.addressee_id "
+              "JOIN users m ON m.id = r.requester_id "
+              "WHERE m.username = $1 AND r.status = 'pending' ORDER BY u.username",
+              me, cb, ud);
+}
+
+void store_online_each(store_user_cb cb, void *ud)
+{
+    for (size_t i = 0; i < g_users_n; i++)
+        if (g_users[i]->conn)
+            cb(g_users[i]->username, g_users[i]->display_name, ud);
+}
+
+/* ================================================================
+ * Tin nhắn 1-1
+ * ================================================================ */
+
+bool store_msg_save(const char *from, const char *to, const char *text,
+                    bool delivered, long long *msg_id, long long *ts_ms)
+{
+    const char *p2[2] = { from, to };
+    PGresult *res = run(
+        "INSERT INTO conversations (type, direct_key) "
+        "SELECT 'direct', LEAST(a.id, b.id) || ':' || GREATEST(a.id, b.id) "
+        "FROM users a, users b WHERE a.username = $1 AND b.username = $2 "
+        "ON CONFLICT (direct_key) DO NOTHING",
+        2, p2, PGRES_COMMAND_OK);
+    if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        PQclear(res);
+        return false;
+    }
+    PQclear(res);
+
+    const char *p3[3] = { from, to, text };
+    res = run(
+        "INSERT INTO messages (conversation_id, sender_id, text) "
+        "SELECT c.id, a.id, $3 FROM users a, users b, conversations c "
+        "WHERE a.username = $1 AND b.username = $2 "
+        "AND c.direct_key = LEAST(a.id, b.id) || ':' || GREATEST(a.id, b.id) "
+        "RETURNING id, (extract(epoch FROM created_at) * 1000)::bigint",
+        3, p3, PGRES_TUPLES_OK);
+    if (!res || PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1) {
+        PQclear(res);
+        return false;
+    }
+    char idbuf[32];
+    snprintf(idbuf, sizeof idbuf, "%s", PQgetvalue(res, 0, 0));
+    *msg_id = strtoll(idbuf, NULL, 10);
+    *ts_ms = strtoll(PQgetvalue(res, 0, 1), NULL, 10);
+    PQclear(res);
+
+    /* Biên nhận cho người nhận: delivered_at NULL = tin offline chưa giao. */
+    const char *pr[3] = { idbuf, to, delivered ? "t" : "f" };
+    res = run("INSERT INTO message_receipts (message_id, user_id, delivered_at) "
+              "SELECT $1::bigint, id, CASE WHEN $3::boolean THEN now() END "
+              "FROM users WHERE username = $2",
+              3, pr, PGRES_COMMAND_OK);
+    PQclear(res);
+    return true;
+}
+
+void store_msg_history(const char *a, const char *b, int limit,
+                       store_msg_cb cb, void *ud)
+{
+    char lim[16];
+    snprintf(lim, sizeof lim, "%d", limit);
+    const char *p[3] = { a, b, lim };
+    PGresult *res = run(
+        "SELECT * FROM ("
+        "  SELECT m.id, s.username AS sender, m.text, "
+        "         (extract(epoch FROM m.created_at) * 1000)::bigint AS ts "
+        "  FROM messages m "
+        "  JOIN conversations c ON c.id = m.conversation_id "
+        "  JOIN users ua ON ua.username = $1 "
+        "  JOIN users ub ON ub.username = $2 "
+        "  JOIN users s ON s.id = m.sender_id "
+        "  WHERE c.direct_key = LEAST(ua.id, ub.id) || ':' || GREATEST(ua.id, ub.id) "
+        "    AND m.deleted_at IS NULL "
+        "  ORDER BY m.id DESC LIMIT $3::int) t ORDER BY id",
+        3, p, PGRES_TUPLES_OK);
+    if (!res)
+        return;
+    if (PQresultStatus(res) == PGRES_TUPLES_OK)
+        for (int i = 0; i < PQntuples(res); i++)
+            cb(strtoll(PQgetvalue(res, i, 0), NULL, 10), PQgetvalue(res, i, 1),
+               PQgetvalue(res, i, 2), strtoll(PQgetvalue(res, i, 3), NULL, 10), ud);
+    PQclear(res);
 }
 
 bool store_token_create(const store_user_t *u, char *token_out)

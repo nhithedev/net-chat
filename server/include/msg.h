@@ -52,6 +52,7 @@ typedef enum {
  * ================================================================ */
 
 #define MSG_TYPES(X)                       \
+    X(HELLO,           0)                  \
     X(REGISTER,        0)                  \
     X(LOGIN,           0)                  \
     X(RESUME,          0)                  \
@@ -216,7 +217,8 @@ void msg_set_auth_fn(msg_auth_fn f);
  *   4. thiếu type/id, sai kiểu data -> ERR_BAD_REQUEST (PING được thiếu id)
  *      type lạ                      -> ERR_BAD_REQUEST
  *   5. needs_auth && chưa đăng nhập -> ERR_NOT_AUTHENTICATED
- *   6. PING chưa có handler riêng   -> PONG (xử lý sẵn)
+ *   6. PING chưa có handler riêng   -> PONG (xử lý sẵn); HELLO xử lý sẵn:
+ *      thương lượng mã hóa/nhịp PING rồi bật mã hóa cho kết nối (protocol-v2 4.2)
  *   7. gọi handler đã đăng ký       -> chưa đăng ký: ERR_INTERNAL
  * Request chỉ sống trong lúc handler chạy; muốn giữ thì copy dữ liệu ra.
  */

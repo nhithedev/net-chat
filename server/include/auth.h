@@ -9,7 +9,13 @@
 #ifndef AUTH_H
 #define AUTH_H
 
+#include <stdbool.h>
+
 #include "net.h"
+
+/* username hợp lệ (3..20 ký tự a-z 0-9 _, không phân biệt hoa thường) -> chữ thường.
+ * out cần ít nhất 21 byte. Trả false nếu sai định dạng. */
+bool auth_normalize_username(const char *in, char *out);
 
 /* Đăng ký handler và hàm kiểm tra xác thực vào msg. Gọi một lần lúc khởi động. */
 void auth_init(void);
