@@ -130,8 +130,8 @@
   <h2>7. Cách demo</h2>
   <h3>Server + kịch bản 2 người dùng (hiện cả seq/ack và payload)</h3>
 <pre>cd server
-export NETCHAT_DB="host=127.0.0.1 port=5433 dbname=chat user=chat password=chat"
-make && ./build/server              # cổng 9000
+export NETCHAT_DB="host=127.0.0.1 port=5432 dbname=chat user=chat password=chat"
+make && ./build/netchat-server              # cổng 9000
 python3 -I tests/demo_chat.py       # 8 bước: đăng ký → kết bạn → chat → rớt mạng → offline</pre>
   <h3>Ứng dụng đầy đủ (Electron)</h3>
 <pre>cd client/native && make            # build lõi C

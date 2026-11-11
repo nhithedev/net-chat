@@ -144,20 +144,6 @@ export default function AuthPage({ registeredAccount, onRegistered, onAuthentica
 
   return (
     <main className="auth-page">
-      <section className="auth-page__intro">
-        <h1>
-          Trò chuyện nhẹ nhàng,
-          <br />
-          <em>kết nối tự nhiên.</em>
-        </h1>
-        <p>Một không gian riêng tư để nhắn tin với bạn bè và những nhóm thân thiết.</p>
-        {!live && (
-          <div className="auth-page__demo">
-            <strong>Tài khoản thử nhanh</strong>
-            <span>demo / demo123</span>
-          </div>
-        )}
-      </section>
       <section className="auth-page__form">
         {screen === 'login' ? (
           <LoginForm
@@ -170,6 +156,11 @@ export default function AuthPage({ registeredAccount, onRegistered, onAuthentica
           />
         ) : (
           <RegisterForm loading={busy} errors={registerErrors} formError={registerError} onSubmit={register} onLogin={showLogin} />
+        )}
+        {!live && (
+          <p className="auth-page__demo">
+            Tài khoản thử nhanh: <code>demo / demo123</code>
+          </p>
         )}
       </section>
     </main>
