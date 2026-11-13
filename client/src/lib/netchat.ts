@@ -12,7 +12,7 @@ export interface NetchatApi {
   disconnect(): Promise<void>
   request<T = Record<string, unknown>>(type: string, data?: object): Promise<NetchatResult<T>>
   onEvent(cb: (evt: { type: string; data: unknown }) => void): () => void
-  onStatus(cb: (s: { state: 'connecting' | 'open' | 'closed'; reason?: string }) => void): () => void
+  onStatus(cb: (s: { state: 'connecting' | 'open' | 'reconnecting' | 'restored' | 'closed'; reason?: string }) => void): () => void
 }
 
 declare global {

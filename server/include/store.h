@@ -17,6 +17,7 @@
 #define STORE_SALT_HEX_LEN   32         /* 16 byte ngẫu nhiên */
 #define STORE_HASH_HEX_LEN   64         /* SHA-256 */
 #define STORE_TOKEN_HEX_LEN  64         /* 32 byte ngẫu nhiên (protocol 4.2) */
+#define STORE_RESUME_HOLD_S  60         /* giữ phiên sau khi mất kết nối (protocol 4.2) */
 
 typedef struct {
     long long    id;                    /* users.id trong DB */
@@ -50,6 +51,21 @@ bool store_user_check_password(const store_user_t *u, const char *password);
  * STORE_TOKEN_HEX_LEN + 1 byte). Trả false nếu lỗi.
  */
 bool store_token_create(const store_user_t *u, char *token_out);
+
+/*
+ * RESUME (protocol 4.2): token còn hạn thì trả user của nó và gia hạn lại (1 ngày,
+ * vì kết nối mới đã thành kết nối đang mở). NULL nếu token sai, đã hết hạn hoặc lỗi DB.
+ */
+store_user_t *store_token_resume(const char *token);
+
+/* LOGOUT: hủy mọi token của u (không RESUME được nữa). */
+void store_token_revoke(const store_user_t *u);
+
+/*
+ * Kết nối của u vừa đóng: mọi token của u chỉ còn dùng được thêm STORE_RESUME_HOLD_S
+ * giây (token hết hạn sớm hơn thì giữ nguyên). Gọi từ on_close.
+ */
+void store_token_hold(const store_user_t *u);
 
 /* ---------------------------------------------------------------- bạn bè */
 

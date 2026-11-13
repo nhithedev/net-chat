@@ -1,5 +1,5 @@
 /*
- * auth.c - REGISTER, LOGIN. RESUME/LOGOUT/... sẽ thêm sau.
+ * auth.c - REGISTER, LOGIN, RESUME, LOGOUT.
  */
 #include "auth.h"
 
@@ -72,6 +72,42 @@ static void handle_register(net_conn_t *c, const msg_request_t *req)
     }
 }
 
+/*
+ * Gắn kết nối c vào u. Đăng nhập trùng (protocol 4.3): đá kết nối cũ. Gán
+ * u->conn = c trước để kết nối cũ mất quyền ngay; on_close của nó sẽ không đụng
+ * tới u->conn. Trả kết nối cũ (hoặc NULL).
+ */
+static net_conn_t *attach_session(net_conn_t *c, store_user_t *u)
+{
+    net_conn_t *old = u->conn;
+    u->conn = c;
+    net_conn_set_data(c, u);
+    if (old && old != c) {
+        net_log(old, "bị đá: user=%s đăng nhập ở nơi khác", u->username);
+        json_builder_t *d = jb_object();
+        if (d)
+            jb_put_str(d, "reason", "login_elsewhere");
+        msg_push_event(old, "EVT_KICKED", d);
+        net_close_after_flush(old);
+    }
+    return old;
+}
+
+/* Sau LOGIN_RES / RESUME_RES: tin offline rồi báo bạn bè. */
+static void after_authenticated(net_conn_t *c, store_user_t *u, net_conn_t *old)
+{
+    /* Chưa có tin offline thật: đẩy batch rỗng đúng như protocol 8.1. */
+    json_builder_t *m = jb_object();
+    if (m) {
+        jb_put_arr(m, "messages", jb_array());
+        msg_push_event(c, "EVT_OFFLINE_MSGS", m);
+    }
+
+    /* Đăng nhập đá kết nối cũ thì user vẫn online, không báo bạn bè lần nữa. */
+    if (!old)
+        chat_on_login(u);
+}
+
 static void handle_login(net_conn_t *c, const msg_request_t *req)
 {
     if (is_authed(c)) {
@@ -106,20 +142,7 @@ static void handle_login(net_conn_t *c, const msg_request_t *req)
         return;
     }
 
-    /* Đăng nhập trùng (protocol 4.3): đá kết nối cũ. Gán u->conn = c trước
-     * để kết nối cũ mất quyền ngay; on_close của nó sẽ không đụng tới u->conn. */
-    net_conn_t *old = u->conn;
-    u->conn = c;
-    net_conn_set_data(c, u);
-    if (old && old != c) {
-        net_log(old, "bị đá: user=%s đăng nhập ở nơi khác", u->username);
-        json_builder_t *d = jb_object();
-        if (d)
-            jb_put_str(d, "reason", "login_elsewhere");
-        msg_push_event(old, "EVT_KICKED", d);
-        net_close_after_flush(old);
-    }
-
+    net_conn_t *old = attach_session(c, u);
     net_log(c, "đăng nhập user=%s", u->username);
     json_builder_t *d = jb_object();
     if (d) {
@@ -128,17 +151,58 @@ static void handle_login(net_conn_t *c, const msg_request_t *req)
         jb_put_str(d, "display_name", u->display_name);
     }
     msg_reply_ok(c, req, d);
+    after_authenticated(c, u, old);
+}
 
-    /* Chưa có tin offline thật: đẩy batch rỗng đúng như protocol 8.1. */
-    json_builder_t *m = jb_object();
-    if (m) {
-        jb_put_arr(m, "messages", jb_array());
-        msg_push_event(c, "EVT_OFFLINE_MSGS", m);
+static bool is_token_hex(const char *s)
+{
+    if (strlen(s) != STORE_TOKEN_HEX_LEN)
+        return false;
+    for (const char *p = s; *p; p++)
+        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f')))
+            return false;
+    return true;
+}
+
+/* RESUME (protocol 4.2): vào lại bằng token trong 60 giây, không cần mật khẩu. */
+static void handle_resume(net_conn_t *c, const msg_request_t *req)
+{
+    if (is_authed(c)) {
+        msg_reply_error(c, req, ERR_BAD_REQUEST, "Đã đăng nhập");
+        return;
     }
 
-    /* Đăng nhập đá kết nối cũ thì user vẫn online, không báo bạn bè lần nữa. */
-    if (!old)
-        chat_on_login(u);
+    const char *token;
+    if (!msg_get_str(req, "token", &token)) {
+        msg_reply_error(c, req, ERR_BAD_REQUEST, NULL);
+        return;
+    }
+    store_user_t *u = is_token_hex(token) ? store_token_resume(token) : NULL;
+    if (!u) {
+        net_log(c, "RESUME thất bại: token sai hoặc hết hạn");
+        msg_reply_error(c, req, ERR_TOKEN_INVALID, NULL);
+        return;
+    }
+
+    net_conn_t *old = attach_session(c, u);
+    net_log(c, "RESUME user=%s", u->username);
+    json_builder_t *d = jb_object();
+    if (d) {
+        jb_put_str(d, "username", u->username);
+        jb_put_str(d, "display_name", u->display_name);
+    }
+    msg_reply_ok(c, req, d);
+    after_authenticated(c, u, old);
+}
+
+/* LOGOUT (chuc-nang 3.3): hủy token, trả LOGOUT_RES rồi đóng. on_close báo bạn bè offline. */
+static void handle_logout(net_conn_t *c, const msg_request_t *req)
+{
+    store_user_t *u = conn_user(c);        /* đã qua kiểm tra xác thực nên khác NULL */
+    store_token_revoke(u);
+    net_log(c, "đăng xuất user=%s", u->username);
+    msg_reply_ok(c, req, NULL);
+    net_close_after_flush(c);
 }
 
 int auth_net_is_authed(net_conn_t *c, void *ud)
@@ -153,7 +217,9 @@ void auth_net_on_close(net_conn_t *c, void *ud)
     store_user_t *u = conn_user(c);
     if (u && u->conn == c) {
         u->conn = NULL;
-        net_log(c, "ngắt kết nối user=%s", u->username);
+        net_log(c, "ngắt kết nối user=%s, giữ phiên %ds", u->username,
+                STORE_RESUME_HOLD_S);
+        store_token_hold(u);
         chat_on_disconnect(u);
     }
 }
@@ -162,5 +228,7 @@ void auth_init(void)
 {
     msg_register_handler(MSG_REGISTER, handle_register);
     msg_register_handler(MSG_LOGIN, handle_login);
+    msg_register_handler(MSG_RESUME, handle_resume);
+    msg_register_handler(MSG_LOGOUT, handle_logout);
     msg_set_auth_fn(is_authed);
 }

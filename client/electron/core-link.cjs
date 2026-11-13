@@ -5,6 +5,9 @@
 //   (length = 1 + độ dài body), tự ghép/tách như với TCP.
 // - Giữ bảng  id -> Promise  để trả response về đúng chỗ gọi; message không có
 //   id khớp (EVT_*) được chuyển lên giao diện qua onEvent.
+// - Token phiên: LOGIN thành công thì main đưa token cho lõi (set_session) để lõi tự
+//   RESUME khi rớt mạng, rồi bỏ token khỏi kết quả trả cho giao diện (token chỉ nằm
+//   ở main và lõi, protocol-v2 4.6). LOGOUT thành công hoặc disconnect thì xóa token và đóng kết nối.
 // File này KHÔNG mở socket: mọi việc mạng do lõi C làm.
 const { spawn } = require('child_process')
 
@@ -23,20 +26,22 @@ const TIMEOUT = { ok: false, error: { code: -3, message: 'Máy chủ không ph�
 function createCoreLink({ corePath, onEvent, onStatus, onLog }) {
   let core = null
   let rx = Buffer.alloc(0)
-  let state = 'closed' // connecting | open | closed
+  let state = 'closed' // connecting | open | reconnecting | closed
   let nextId = 1
-  const pending = new Map() // id -> { resolve, timer }
+  const pending = new Map() // id -> { type, resolve, timer }
   let waiters = [] // đang chờ kết quả của connect()
 
   function setState(next, reason) {
-    state = next
-    onStatus?.({ state: next, reason })
-    if (next === 'open' || next === 'closed') {
+    onStatus?.({ state: next, reason }) // giao diện thấy cả 'restored'
+    // 'restored' chỉ là mốc báo; ngay sau đó lõi báo 'open'.
+    state = next === 'restored' ? 'open' : next
+    if (state === 'open' || state === 'closed') {
       const w = waiters
       waiters = []
-      w.forEach((fn) => fn(next, reason))
+      w.forEach((fn) => fn(state, reason))
     }
-    if (next === 'closed') failAllPending()
+    // Request đang bay chắc chắn mất: response (nếu có) không còn đường về.
+    if (state === 'closed' || state === 'reconnecting') failAllPending()
   }
 
   function failAllPending() {
@@ -70,7 +75,20 @@ function createCoreLink({ corePath, onEvent, onStatus, onLog }) {
       if (p) {
         clearTimeout(p.timer)
         pending.delete(msg.id)
-        p.resolve(msg.ok ? { ok: true, data: msg.data ?? {} } : { ok: false, error: msg.error })
+        if (msg.ok) {
+          const data = { ...(msg.data ?? {}) }
+          if (p.type === 'LOGIN' && typeof data.token === 'string') {
+            writeFrame(K_CTRL, { cmd: 'set_session', token: data.token })
+            delete data.token
+          } else if (p.type === 'LOGOUT') {
+            // Lệnh close xóa token ở lõi và đóng ngay, để màn đăng nhập kế tiếp
+            // luôn mở kết nối mới thay vì dùng lại kết nối server sắp đóng.
+            writeFrame(K_CTRL, { cmd: 'close' })
+          }
+          p.resolve({ ok: true, data })
+        } else {
+          p.resolve({ ok: false, error: msg.error })
+        }
       } else if (typeof msg.type === 'string' && msg.type.startsWith('EVT_')) {
         onEvent?.(msg)
       }
@@ -113,6 +131,7 @@ function createCoreLink({ corePath, onEvent, onStatus, onLog }) {
     start()
     if (!core) return Promise.resolve({ ok: false, error: { code: -4, message: 'Không tìm thấy lõi mạng' } })
     if (state === 'open') return Promise.resolve({ ok: true })
+    // Đang tự kết nối lại: chờ kết quả, không mở kết nối mới chen vào.
 
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -124,7 +143,7 @@ function createCoreLink({ corePath, onEvent, onStatus, onLog }) {
         resolve(s === 'open' ? { ok: true } : { ok: false, error: { code: -1, message: 'Không kết nối được máy chủ (' + reason + ')' } })
       }
       waiters.push(done)
-      if (state !== 'connecting') writeFrame(K_CTRL, { cmd: 'connect', host, port })
+      if (state !== 'connecting' && state !== 'reconnecting') writeFrame(K_CTRL, { cmd: 'connect', host, port })
     })
   }
 
@@ -141,7 +160,7 @@ function createCoreLink({ corePath, onEvent, onStatus, onLog }) {
         pending.delete(id)
         resolve(TIMEOUT)
       }, REQUEST_TIMEOUT_MS)
-      pending.set(id, { resolve, timer })
+      pending.set(id, { type, resolve, timer })
       writeFrame(K_SEND, data === undefined ? { type, id } : { type, id, data })
     })
   }

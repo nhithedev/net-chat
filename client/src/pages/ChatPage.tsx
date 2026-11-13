@@ -30,7 +30,7 @@ type ChatPageProps = {
 type DialogName = 'addFriend' | 'createGroup' | 'invite'
 
 export default function ChatPage({ user, onSessionExpired, onOpenAccount, onKicked, onDisconnected, onBlockUser }: ChatPageProps) {
-  const connection = useConnectionStatus({ onSessionExpired, onDisconnected })
+  const connection = useConnectionStatus({ onSessionExpired, onDisconnected, onKicked })
   const activity = useActivityLog()
   const chat = useChatPrototype(user, connection.status, {
     onKicked,

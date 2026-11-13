@@ -427,7 +427,11 @@ bool store_token_create(const store_user_t *u, char *token_out)
     if (!random_hex(STORE_TOKEN_HEX_LEN / 2, token))
         return false;
 
-    /* Hạn tạm 1 ngày; khi làm RESUME sẽ đặt now()+60s lúc mất kết nối. */
+    /* Dọn token đã hết hạn cho bảng khỏi phình; lỗi ở đây không ảnh hưởng đăng nhập. */
+    PQclear(run("DELETE FROM sessions WHERE expires_at < now()", 0, NULL,
+                PGRES_COMMAND_OK));
+
+    /* Hạn 1 ngày khi đang kết nối; store_token_hold rút còn 60s lúc mất kết nối. */
     const char *params[2] = { token, u->username };
     PGresult *res = run("INSERT INTO sessions (token, user_id, expires_at) "
                         "SELECT $1, id, now() + interval '1 day' "
@@ -439,4 +443,38 @@ bool store_token_create(const store_user_t *u, char *token_out)
     if (ok)
         memcpy(token_out, token, sizeof token);
     return ok;
+}
+
+store_user_t *store_token_resume(const char *token)
+{
+    const char *p[1] = { token };
+    PGresult *res = run("UPDATE sessions s SET expires_at = now() + interval '1 day' "
+                        "FROM users u WHERE s.token = $1 AND s.expires_at > now() "
+                        "AND u.id = s.user_id RETURNING u.username",
+                        1, p, PGRES_TUPLES_OK);
+    store_user_t *u = NULL;
+    if (res && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+        u = store_user_find(PQgetvalue(res, 0, 0));
+    PQclear(res);
+    return u;
+}
+
+void store_token_hold(const store_user_t *u)
+{
+    char secs[16];
+    snprintf(secs, sizeof secs, "%d", STORE_RESUME_HOLD_S);
+    const char *p[2] = { u->username, secs };
+    PGresult *res = run("UPDATE sessions SET expires_at = "
+                        "LEAST(expires_at, now() + $2::int * interval '1 second') "
+                        "WHERE user_id = (SELECT id FROM users WHERE username = $1)",
+                        2, p, PGRES_COMMAND_OK);
+    PQclear(res);
+}
+
+void store_token_revoke(const store_user_t *u)
+{
+    const char *p[1] = { u->username };
+    PQclear(run("DELETE FROM sessions WHERE user_id = "
+                "(SELECT id FROM users WHERE username = $1)",
+                1, p, PGRES_COMMAND_OK));
 }

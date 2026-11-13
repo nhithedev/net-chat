@@ -22,3 +22,8 @@ build:
 
 clean:
 	rm -rf build
+
+# test lõi với server thật (cần DB đang chạy và `make` trong ../../server); mất ~70 giây
+.PHONY: test
+test: build/netchat-core
+	python3 -I tests/resume_test.py build/netchat-core ../../server/build/netchat-server

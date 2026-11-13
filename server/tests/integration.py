@@ -389,10 +389,18 @@ class NetTest(unittest.TestCase):
                          ("FRIEND_LIST_RES", "c-3", 2))
 
     def test_command_without_handler_is_internal_error(self):
+        # GROUP_LIST cần đăng nhập và chưa có handler (nhóm chưa làm)
         c = self.client()
-        c.send_msg({"type": "RESUME", "id": "c-4", "data": {}})
+        user = uname("nohandler")
+        for i, (t, d) in enumerate([("REGISTER", {"username": user, "password": "123456",
+                                                  "display_name": "X"}),
+                                    ("LOGIN", {"username": user, "password": "123456"})]):
+            c.send_msg({"type": t, "id": f"c-{i}", "data": d})
+            self.assertTrue(c.recv_msg()["ok"])
+        c.recv_msg()                                  # EVT_OFFLINE_MSGS
+        c.send_msg({"type": "GROUP_LIST", "id": "c-4", "data": {}})
         r = c.recv_msg()
-        self.assertEqual(r["type"], "RESUME_RES")
+        self.assertEqual(r["type"], "GROUP_LIST_RES")
         self.assertEqual(r["error"]["code"], 11)
 
     def test_ping_with_data_and_without_id(self):
@@ -577,6 +585,109 @@ class AuthTest(unittest.TestCase):
         b.recv_msg()
         b.send_msg({"type": "GROUP_LIST", "id": "c-9"})
         self.assertNotEqual(b.recv_msg()["error"]["code"], 2)
+
+    def login(self, c, user, pw="123456"):
+        self.register(c, user)
+        r = self.call(c, "LOGIN", {"username": user, "password": pw}, "c-2")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(c.recv_msg()["type"], "EVT_OFFLINE_MSGS")
+        return r["data"]["token"]
+
+    def test_resume_with_token(self):
+        a = self.client()
+        token = self.login(a, uname("res_user"))
+        a.close()                               # rớt mạng
+        b = self.client()
+        r = self.call(b, "RESUME", {"token": token}, "r-1")
+        self.assertEqual((r["type"], r["id"], r["ok"]), ("RESUME_RES", "r-1", True), r)
+        self.assertEqual(r["data"]["username"], uname("res_user"))
+        self.assertEqual(r["data"]["display_name"], "Tên")
+        self.assertEqual(b.recv_msg()["type"], "EVT_OFFLINE_MSGS")
+        # đã xác thực thật: lệnh cần đăng nhập không còn ERR_NOT_AUTHENTICATED
+        b.send_msg({"type": "ONLINE_LIST", "id": "r-2"})
+        self.assertTrue(b.recv_msg()["ok"])
+        # token dùng lại được cho lần rớt mạng sau
+        b.close()
+        c = self.client()
+        self.assertTrue(self.call(c, "RESUME", {"token": token}, "r-3")["ok"])
+
+    def test_resume_bad_token(self):
+        c = self.client()
+        for tok in ("0" * 64, "xyz", "A" * 64):
+            r = self.call(c, "RESUME", {"token": tok}, "r-1")
+            self.assertEqual((r["ok"], r["error"]["code"]), (False, 1003), tok)
+        r = self.call(c, "RESUME", {}, "r-2")
+        self.assertEqual(r["error"]["code"], 1)
+
+    def test_resume_expired_token(self):
+        a = self.client()
+        token = self.login(a, uname("exp_user"))
+        a.close()
+        time.sleep(0.3)
+        # giả lập hết 60 giây: sửa thẳng hạn trong DB
+        subprocess.run(["docker", "exec", "netchat-db", "psql", "-U", "chat", "-d", "chat",
+                        "-c", f"UPDATE sessions SET expires_at = now() - interval '1 second' "
+                              f"WHERE token = '{token}'"], check=True, capture_output=True)
+        b = self.client()
+        r = self.call(b, "RESUME", {"token": token}, "r-1")
+        self.assertEqual(r["error"]["code"], 1003)
+
+    def test_resume_while_authenticated_rejected(self):
+        a = self.client()
+        token = self.login(a, uname("res_twice"))
+        r = self.call(a, "RESUME", {"token": token}, "r-1")
+        self.assertEqual(r["error"]["code"], 1)
+
+    def test_resume_kicks_other_connection(self):
+        a = self.client()
+        token = self.login(a, uname("res_kick"))
+        b = self.client()
+        self.assertTrue(self.call(b, "RESUME", {"token": token}, "r-1")["ok"])
+        self.assertEqual(a.recv_msg(), {"type": "EVT_KICKED", "data": {"reason": "login_elsewhere"}})
+
+    def test_resume_notifies_friends(self):
+        an, binh = self.client(), self.client()
+        an_name, binh_name = uname("res_an"), uname("res_binh")
+        token = self.login(an, an_name)
+        self.login(binh, binh_name)
+        self.call(an, "FRIEND_REQUEST", {"to": binh_name}, "f-1")
+        self.assertEqual(binh.recv_msg()["type"], "EVT_FRIEND_REQUEST")
+        self.call(binh, "FRIEND_ACCEPT", {"from": an_name}, "f-2")
+        self.assertEqual(an.recv_msg()["type"], "EVT_FRIEND_ACCEPTED")
+        an.close()
+        evt = binh.recv_msg()
+        self.assertEqual((evt["type"], evt["data"]["username"]), ("EVT_USER_OFFLINE", an_name))
+        an2 = self.client()
+        self.assertTrue(self.call(an2, "RESUME", {"token": token}, "r-1")["ok"])
+        evt = binh.recv_msg()
+        self.assertEqual((evt["type"], evt["data"]["username"]), ("EVT_USER_ONLINE", an_name))
+
+    def test_logout_revokes_token_and_closes(self):
+        an, binh = self.client(), self.client()
+        an_name, binh_name = uname("lo_an"), uname("lo_binh")
+        token = self.login(an, an_name)
+        self.login(binh, binh_name)
+        self.call(an, "FRIEND_REQUEST", {"to": binh_name}, "f-1")
+        binh.recv_msg()
+        self.call(binh, "FRIEND_ACCEPT", {"from": an_name}, "f-2")
+        an.recv_msg()
+        r = self.call(an, "LOGOUT", {}, "o-1")
+        self.assertEqual((r["type"], r["id"], r["ok"]), ("LOGOUT_RES", "o-1", True))
+        self.assertTrue(an.expect_closed())
+        evt = binh.recv_msg()
+        self.assertEqual((evt["type"], evt["data"]["username"]), ("EVT_USER_OFFLINE", an_name))
+        # token đã hủy: không RESUME được
+        c = self.client()
+        r = self.call(c, "RESUME", {"token": token}, "r-1")
+        self.assertEqual(r["error"]["code"], 1003)
+        # đăng nhập lại bình thường
+        r = self.call(c, "LOGIN", {"username": an_name, "password": "123456"}, "l-1")
+        self.assertTrue(r["ok"], r)
+
+    def test_logout_requires_login(self):
+        c = self.client()
+        r = self.call(c, "LOGOUT", {}, "o-1")
+        self.assertEqual(r["error"]["code"], 2)
 
     def test_second_login_on_same_connection_rejected(self):
         c = self.client()

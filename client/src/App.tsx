@@ -27,11 +27,11 @@ export default function App() {
   const [blockedUsers, setBlockedUsers] = useState<User[]>([])
   const activity = useActivityLogStore(currentUser?.username)
 
-  // Quay về màn đăng nhập = đóng kết nối cũ, lần sau là kết nối mới.
+  // Quay về màn đăng nhập. Gửi LOGOUT để server hủy token và báo bạn bè offline;
+  // khi kết nối đã mất (bị đá, hết phiên) request tự thất bại và disconnect dọn nốt.
   function logout() {
-    // Server chưa có LOGOUT; đóng kết nối TCP để người dùng được đánh dấu offline
-    // và màn đăng nhập mở kết nối mới (AuthPage tự kết nối lại khi cần).
-    void window.netchat?.disconnect()
+    const api = window.netchat
+    if (api) void api.request('LOGOUT').then(() => api.disconnect())
     setCurrentUser(null)
     setScreen('chat')
     setFatalState(null)
